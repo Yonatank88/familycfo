@@ -1,0 +1,35 @@
+{
+  "documentsRoot": "documents",
+  "policies": [
+    {
+      "insured": "בן/בת זוג 1",
+      "set": {
+        "name": "ביטוח בריאות פרטי",
+        "type": "health",
+        "insurer": "כלל",
+        "policyNumber": "000777888",
+        "premium": 142.5,
+        "premiumFrequency": "monthly",
+        "paymentAccountId": null,
+        "matchPattern": "כלל ביטוח",
+        "startDate": "2022-01-01",
+        "endDate": null,
+        "coverage": "ניתוחים בישראל ובחו\"ל, השתלות, תרופות מחוץ לסל",
+        "deductible": "₪0 בניתוח בהסכם",
+        "agentName": "ישראל ישראלי",
+        "agentPhone": "03-0000000",
+        "notes": "מתחדש כל שנתיים"
+      },
+      "documents": [
+        { "file": "health-policy.pdf", "name": "פוליסת בריאות — תנאים כלליים", "kind": "policy" }
+      ]
+    },
+    {
+      "match": { "insurer": "הראל", "policyNumber": "000555666" },
+      "set": { "endDate": "2045-02-01", "notes": "עודכן מהר הביטוח" }
+    }
+  ],
+  "assetSnapshots": [
+    { "provider": "מגדל", "policyNumber": "000111222", "date": "2026-09-30", "value": 318500 }
+  ]
+}

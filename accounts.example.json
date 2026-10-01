@@ -1,0 +1,20 @@
+{
+  "accounts": [
+    {
+      "companyId": "hapoalim",
+      "credentials": { "userCode": "YOUR_USER_CODE", "password": "YOUR_PASSWORD" }
+    },
+    {
+      "companyId": "isracard",
+      "credentials": { "id": "YOUR_ID_NUMBER", "card6Digits": "123456", "password": "YOUR_PASSWORD" }
+    },
+    {
+      "companyId": "max",
+      "credentials": { "username": "YOUR_USERNAME", "password": "YOUR_PASSWORD" }
+    },
+    {
+      "companyId": "visaCal",
+      "credentials": { "username": "YOUR_USERNAME", "password": "YOUR_PASSWORD" }
+    }
+  ]
+}

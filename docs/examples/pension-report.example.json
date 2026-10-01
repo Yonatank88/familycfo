@@ -1,0 +1,85 @@
+{
+  "asOf": "2026-06-30",
+  "member": "בן/בת זוג 1",
+  "source": "דוח תקופתי — סוכנות לדוגמה",
+  "file": "2026-06-pension-report.pdf",
+  "issuedAt": "2026-07-15",
+  "agent": { "name": "ישראל ישראלי", "agency": "סוכנות לדוגמה", "phone": "03-0000000", "email": "agent@example.com" },
+  "summary": {
+    "totalSavings": 412000,
+    "ytdReturnPct": 6.4,
+    "lifeHealthMonthlyPremium": 180,
+    "byProductType": [
+      { "name": "קרן פנסיה", "amount": 310000, "pct": 75.2 },
+      { "name": "קרן השתלמות", "amount": 102000, "pct": 24.8 }
+    ],
+    "byProvider": [
+      { "name": "מגדל", "amount": 310000, "pct": 75.2 },
+      { "name": "אלטשולר שחם", "amount": 102000, "pct": 24.8 }
+    ],
+    "tradedPct": { "traded": 68, "nonTraded": 32 },
+    "exposurePct": { "stocks": 52, "abroad": 41, "foreignCurrency": 23 },
+    "assetMixPct": [{ "name": "מניות", "pct": 52 }, { "name": "אג\"ח", "pct": 30 }, { "name": "אחר", "pct": 18 }],
+    "monthlyDeposits": { "pension": 2900, "keren_hishtalmut": 1500, "total": 4400 },
+    "expectedAnnuity": { "pensionWithoutDeposits": 2100, "pensionWithDeposits": 9800, "managers": 0, "totalWithoutDeposits": 2100 },
+    "coverage": { "disability": 14500, "death": 1200000, "noInfo": [] }
+  },
+  "products": [
+    {
+      "type": "pension",
+      "name": "מגדל מקפת אישית",
+      "provider": "מגדל",
+      "policyNumber": "000111222",
+      "balance": 310000,
+      "feeDeposit": 1.5,
+      "feeBalance": 0.15,
+      "employer": "חברת אלפא בע\"מ",
+      "status": "active",
+      "joinDate": "2015-03-01",
+      "lastDeposit": "2026-06-10",
+      "regularDeposit": 2900,
+      "insuredSalary": 16500,
+      "expectedAnnuity": 2100,
+      "expectedAnnuityWithDeposits": 9800,
+      "tracks": [
+        { "name": "מסלול לבני 50 ומטה", "share": 100, "balance": 310000, "returns": [0.8, 6.4, 11.2, 24.5, 41.3, 7.6, 7.1] }
+      ],
+      "components": { "pitzuyim": 98000, "tagmulim": 212000, "capital": 0 },
+      "coverages": [{ "name": "אובדן כושר עבודה", "pct": 75, "monthly": 14500 }],
+      "coverageCost": { "disability": 62, "survivors": 48 },
+      "deposits": [
+        ["2026-05-10", "2026-04", 16500, 990, 1072, 1361, 3423],
+        ["2026-06-10", "2026-05", 16500, 990, 1072, 1361, 3423]
+      ]
+    },
+    {
+      "type": "keren_hishtalmut",
+      "name": "אלטשולר שחם השתלמות כללי",
+      "provider": "אלטשולר שחם",
+      "policyNumber": "000333444",
+      "balance": 102000,
+      "feeDeposit": 0,
+      "feeBalance": 0.7,
+      "employer": "חברת אלפא בע\"מ",
+      "status": "active",
+      "joinDate": "2019-01-01",
+      "regularDeposit": 1500,
+      "tracks": [
+        { "name": "כללי", "share": 100, "balance": 102000, "returns": [0.9, 7.1, 12.8, 22.0, 38.9, 6.9, 6.8] }
+      ]
+    }
+  ],
+  "insurance": [
+    {
+      "name": "ביטוח חיים ריסק",
+      "type": "life",
+      "insurer": "הראל",
+      "policyNumber": "000555666",
+      "premium": 85,
+      "premiumFrequency": "monthly",
+      "startDate": "2020-02-01",
+      "matchPattern": "הראל",
+      "coverage": "סכום ביטוח ₪1,000,000 למקרה מוות"
+    }
+  ]
+}

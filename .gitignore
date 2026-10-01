@@ -1,0 +1,18 @@
+node_modules
+dist/
+
+# your bank logins — never commit
+accounts.json
+
+# the database and its backups hold all your financial data
+*.db
+*.db-shm
+*.db-wal
+backups/
+
+# imported documents and reports — personal data
+data/
+
+# local tool settings
+.claude/settings.local.json
+.DS_Store

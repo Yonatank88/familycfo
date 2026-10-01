@@ -1,0 +1,49 @@
+{
+  "name": "familycfo",
+  "version": "1.0.0",
+  "description": "FamilyCFO — a local-first CFO for Israeli families: scrapes your banks and credit cards, then shows cash flow, budgets, forecast, net worth, insurance, pension and a stock portfolio, with an optional AI chat over your own data.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "npm --prefix web install",
+    "scrape": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "dev": "concurrently -n api,web -c blue,green \"npm run server\" \"npm --prefix web run dev\"",
+    "server": "tsx watch src/server/index.ts",
+    "web": "npm --prefix web run dev",
+    "migrate": "tsx src/db/migrate.ts",
+    "import:pension": "tsx src/import/pensionReport.ts",
+    "import:insurance": "tsx src/import/insurancePolicies.ts",
+    "pipeline": "tsx src/pipeline.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx src/demo.ts",
+    "dev:demo": "BANK_DB=demo.db npm run dev"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "fastify": "^5.12.5",
+    "israeli-bank-scrapers": "^6.12.2",
+    "node-cron": "^3.0.3",
+    "puppeteer": "^24.37.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.0.2",
+    "concurrently": "^9.2.1"
+  },
+  "overrides": {
+    "israeli-bank-scrapers": {
+      "puppeteer": "$puppeteer"
+    }
+  }
+}
