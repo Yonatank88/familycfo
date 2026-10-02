@@ -1,6 +1,7 @@
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers';
 import { getDb, type DB } from './db/connection.js';
 import { saveScrapedAccount, recordScrapeRun } from './db/ingestRepo.js';
+import { archiveRaw } from './ingest/archive.js';
 import * as readline from 'readline';
 import type { Page } from 'puppeteer';
 import { existsSync } from 'fs';
@@ -146,7 +147,7 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
   const only = process.env.SCRAPE_ONLY?.split(',').map(s => s.trim()).filter(Boolean);
   const summaries: ScrapeSummary[] = [];
 
-  for (const account of config.accounts) {
+  for (const account of config.accounts ?? []) {
     if (only && !only.includes(account.companyId)) continue;
     console.log(`Scraping ${account.companyId}...`);
     hooks.onProgress?.({ type: 'start', company: account.companyId });
@@ -237,7 +238,11 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
         },
       });
 
-      const result = await scraper.scrape(account.credentials as never);
+      // One Zero without a long-term token (npm run link -- onezero) asks for the SMS code on every scrape
+      const credentials = account.companyId === 'oneZero' && !account.credentials.otpLongTermToken
+        ? { ...account.credentials, otpCodeRetriever: hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : promptOtp }
+        : account.credentials;
+      const result = await scraper.scrape(credentials as never);
 
       if (!result.success) {
         console.error(`Failed to scrape ${account.companyId}:`, result.errorType, result.errorMessage);
@@ -250,6 +255,8 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
         continue;
       }
 
+      // the untouched result, before it's normalized (data/raw/<company>/)
+      archiveRaw(account.companyId, result);
       const newIds: number[] = [];
       for (const acc of result.accounts ?? []) {
         const saved = saveScrapedAccount(db, account.companyId, acc);
