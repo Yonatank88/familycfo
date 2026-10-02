@@ -26,7 +26,6 @@ export interface Commitment {
   state: 'paid' | 'partial' | 'pending' | 'missing';
   txIds: number[];
   estimated: boolean;
-  liabilityId: number | null;
   /** the bank account the money actually leaves: the account itself, or the card's billing account */
   payingAccountId: string | null;
   /** card items: the statement date it's (or will be) charged on */
@@ -73,7 +72,7 @@ export interface MonthPlanned {
 interface Row {
   id: number; name: string; kind: string; status: 'confirmed' | 'suggested'; amount: number; amount_mode: string; day_of_month: number;
   bank_account_id: string | null; card_account_id: string | null; member_id: number | null; category_id: number | null;
-  liability_id: number | null; start_date: string | null; end_date: string | null;
+  start_date: string | null; end_date: string | null;
 }
 
 /**
@@ -137,7 +136,7 @@ export function monthPlan(db: DB, filter: TxFilter = {}, opts: { cycleKey?: stri
       method: r.card_account_id ? 'card' : 'bank', accountId,
       memberId: r.member_id ?? owners.get(accountId) ?? null,
       day: r.day_of_month, dueDate, expected, actual, state, txIds: hits.get(r.id)!,
-      estimated: r.amount_mode === 'estimated', liabilityId: r.liability_id,
+      estimated: r.amount_mode === 'estimated',
       payingAccountId: r.card_account_id ? billing.get(r.card_account_id) ?? null : r.bank_account_id,
       chargeDate,
     };

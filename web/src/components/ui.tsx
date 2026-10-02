@@ -417,18 +417,6 @@ export function MemberSelect({ value, onChange, emptyLabel = 'לפי בעל הח
   return <IdPicker className={className} value={value} onChange={onChange} options={options} searchable={false} placeholder={emptyLabel} />;
 }
 
-export function BusinessSelect({ value, onChange, className = 'input' }: {
-  value: number | null | undefined; onChange: (id: number | null) => void; className?: string;
-}) {
-  const { meta } = useLookups();
-  const BizIcon = categoryIcon('עסק');
-  const options: PickerOption[] = [
-    { value: '', label: 'פרטי (לא עסקי)', short: 'פרטי' },
-    ...(meta?.businesses ?? []).filter(b => !b.archived).map(b => ({ value: String(b.id), label: b.name, icon: <BizIcon style={{ color: b.color ?? undefined }} /> })),
-  ];
-  return <IdPicker className={className} value={value} onChange={onChange} options={options} placeholder="פרטי" />;
-}
-
 export function AccountSelect({ value, onChange, kind, emptyLabel = 'בחר חשבון', className = 'input' }: {
   value: string | null | undefined; onChange: (id: string | null) => void; kind?: 'bank' | 'card'; emptyLabel?: string; className?: string;
 }) {

@@ -9,7 +9,7 @@ export interface SaveResult {
 
 /**
  * Store one scraped account: upsert the account, record its balance and insert/update
- * its transactions. User-owned fields (category, member, business, tags, notes...) are
+ * its transactions. User-owned fields (category, member, tags, notes...) are
  * never overwritten here — only data that comes from the bank.
  */
 export function saveScrapedAccount(db: DB, companyId: string, account: ScrapedAccount): SaveResult & { accountId: string } {

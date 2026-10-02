@@ -114,17 +114,13 @@ function seedDemo(db: DB): void {
   balance.run(BANK_A, 18450, `${now} 08:00:00`);
   balance.run(BANK_B, 6230, `${now} 08:00:00`);
 
-  // a savings account, a mortgage, a small portfolio (live prices from Yahoo Finance when online)
+  // a savings account, a study fund, a small portfolio (live prices from Yahoo Finance when online)
   const asset = db.prepare(`INSERT INTO assets (name, type, provider, owner_member_id, currency, liquidity_date) VALUES (?, ?, ?, ?, 'ILS', ?)`);
   const savings = Number(asset.run('חיסכון לחופשה', 'bank_savings', 'leumi', 2, null).lastInsertRowid);
   const study = Number(asset.run('קרן השתלמות', 'keren_hishtalmut', 'אלטשולר שחם', 1, addDays(now, 900)).lastInsertRowid);
   const snap = db.prepare(`INSERT INTO asset_snapshots (asset_id, date, value, currency) VALUES (?, ?, ?, 'ILS')`);
   snap.run(savings, now, 24000);
   snap.run(study, now, 86500);
-  const mortgage = Number(db.prepare(`INSERT INTO liabilities (name, type, lender, owner_member_id, original_principal, interest_rate, index_type,
-    start_date, end_date, monthly_payment, payment_day, bank_account_id, match_pattern) VALUES ('משכנתא', 'mortgage', 'לאומי', 2, 1100000, 4.6, 'prime',
-    '2021-06-01', '2046-06-01', 5200, 2, ?, 'משכנתא')`).run(BANK_B).lastInsertRowid);
-  db.prepare(`INSERT INTO liability_snapshots (liability_id, date, balance) VALUES (?, ?, ?)`).run(mortgage, now, 905000);
 
   const holding = db.prepare(`INSERT INTO holdings (symbol, name, quantity, currency, buy_price, buy_date, broker, owner_member_id, manual_price, manual_price_date)
     VALUES (?, ?, ?, ?, ?, ?, 'IBKR', 1, ?, ?)`);

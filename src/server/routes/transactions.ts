@@ -8,19 +8,18 @@ import { MANUAL_ACCOUNT_ID } from '../../db/migrations.js';
 import { isOverdue, linkPlanned, listPlanned, matchPlanned, plannedCandidates, plannedPayments, unlinkPlanned, type PlannedItem } from '../../analytics/planned.js';
 
 interface TxQuery {
-  from?: string; to?: string; cycle?: string; member?: string; business?: string; tags?: string;
+  from?: string; to?: string; cycle?: string; member?: string; tags?: string;
   category?: string; account?: string; search?: string; kind?: string; review?: string; hideCardPayments?: string;
   /** YYYY-MM-DD: only card rows charged in that statement (same card, same charge month) */
   charge?: string;
   limit?: string; offset?: string;
 }
 
-const EDITABLE = ['category_id', 'member_id', 'business_id', 'business_share_pct', 'kind', 'fixed_override', 'excluded', 'notes'];
+const EDITABLE = ['category_id', 'member_id', 'kind', 'fixed_override', 'excluded', 'notes'];
 
 export function parseFilter(q: TxQuery) {
   return {
     memberId: q.member ? Number(q.member) : undefined,
-    businessId: q.business ? Number(q.business) : undefined,
     tagIds: q.tags ? q.tags.split(',').map(Number).filter(Boolean) : undefined,
     categoryId: q.category ? Number(q.category) : undefined,
     accountId: q.account || undefined,
@@ -59,19 +58,15 @@ export function transactionRoutes(app: FastifyInstance, db: DB): void {
       const o = other != null ? brief.get(other) : undefined;
       return o ? { id: other, description: o.description, account: o.display_name, date: localDate(o.date) } : null;
     };
-    // the same income / spend as everywhere else: household share, net of refunds and paybacks —
+    // the same income / spend as everywhere else: net of refunds and paybacks —
     // transfers between own accounts, savings and card bills move money but aren't income or spend
     const counted = txs.filter(t => !excluded.has(t.id));
     const sum = (f: (t: Tx) => number, list = counted) => list.reduce((s, t) => s + f(t), 0);
-    const business = q.business != null && q.business !== '';
     return {
       total: txs.length,
       totals: {
-        // a business view shows the business's own share
-        income: business ? sum(t => (t.kind === 'income' ? Math.max(0, t.businessAmount) : 0)) : sum(incomeOf),
-        spend: business ? sum(t => (t.kind === 'expense' ? Math.max(0, -t.businessAmount) : 0)) : sum(t => spendOf(t) - refundOf(t)),
-        businessIncome: business ? 0 : sum(t => (t.kind === 'income' && !t.linkedInflow ? Math.max(0, t.businessAmount) : 0)),
-        businessSpend: business ? 0 : sum(t => (t.kind === 'expense' ? Math.max(0, -t.businessAmount) : 0)),
+        income: sum(incomeOf),
+        spend: sum(t => spendOf(t) - refundOf(t)),
         /** transfers, savings and card bills (in + out) — shown so the gap to the bank statement is clear */
         moved: sum(t => (NON_SPEND_KINDS.has(t.kind) ? Math.abs(t.amount) : 0)),
       },
@@ -127,7 +122,7 @@ export function transactionRoutes(app: FastifyInstance, db: DB): void {
         VALUES (?, ?, ?, ?, ?, ?, 'ILS', ?, 'ILS', 'completed', 'normal', ?, 'manual')
       `).run(`manual:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, MANUAL_ACCOUNT_ID, v.iso, v.iso, v.description,
         v.signed, v.signed, v.kind).lastInsertRowid);
-      // category, member, business, tags, notes — the same fields as editing a scraped row
+      // category, member, tags, notes — the same fields as editing a scraped row
       update(newId, b);
       return newId;
     })();
@@ -269,8 +264,6 @@ export function transactionRoutes(app: FastifyInstance, db: DB): void {
       min_amount: body.minAmount ?? null,
       max_amount: body.maxAmount ?? null,
       set_category_id: body.setCategoryId ?? null,
-      set_business_id: body.setBusinessId ?? null,
-      set_business_share_pct: body.setBusinessSharePct ?? null,
       set_member_id: body.setMemberId ?? null,
       set_kind: body.setKind ?? null,
       set_tag_ids: body.tagIds?.length ? JSON.stringify(body.tagIds) : null,
@@ -278,9 +271,9 @@ export function transactionRoutes(app: FastifyInstance, db: DB): void {
     };
     const id = Number(db.prepare(`
       INSERT INTO category_rules (match_type, pattern, account_id, min_amount, max_amount, set_category_id,
-        set_business_id, set_business_share_pct, set_member_id, set_kind, set_tag_ids, priority)
+        set_member_id, set_kind, set_tag_ids, priority)
       VALUES (@match_type, @pattern, @account_id, @min_amount, @max_amount, @set_category_id,
-        @set_business_id, @set_business_share_pct, @set_member_id, @set_kind, @set_tag_ids, @priority)
+        @set_member_id, @set_kind, @set_tag_ids, @priority)
     `).run(values).lastInsertRowid);
     const applied = body.applyToExisting === false ? [] : applyRules(db, 'all');
     if (applied.length) deriveKinds(db, applied);

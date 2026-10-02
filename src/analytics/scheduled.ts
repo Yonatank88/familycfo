@@ -14,7 +14,6 @@ export interface ScheduledItem {
   category_id: number | null;
   match_pattern: string | null;
   card_account_id: string | null;
-  liability_id: number | null;
   start_date: string | null;
   end_date: string | null;
   status: 'suggested' | 'confirmed' | 'dismissed';
@@ -119,7 +118,6 @@ export function suggestScheduledItems(db: DB): number {
     }
   })();
   count += suggestCardCommitments(db, txs);
-  supersedeByLiabilities(db);
   return count;
 }
 
@@ -165,51 +163,6 @@ export function suggestCardCommitments(db: DB, txs: Tx[], asOf = today()): numbe
   }
   return count;
 }
-
-/**
- * Loans and mortgages the user entered (Loans page → scheduled items with liability_id) replace the
- * repayment rows detected from bank history. Otherwise both are forecast and the payment is counted
- * twice. A detected item is superseded when user-entered items of the same kind on the same account
- * add up to its amount (single loan within 5%, mortgage tracks together within 15% — the bank debit
- * often includes insurance or indexation). The user items take over its bank description, so a
- * payment that already went out this month isn't subtracted again.
- */
-export function supersedeByLiabilities(db: DB): number {
-  const manual = db.prepare(`SELECT * FROM scheduled_items WHERE liability_id IS NOT NULL AND status != 'dismissed'
-    AND kind IN ('loan','mortgage') AND bank_account_id IS NOT NULL`).all() as ScheduledItem[];
-  // dismissed ones too: they still tell what the payment looks like on the bank statement
-  const detected = db.prepare(`SELECT * FROM scheduled_items WHERE liability_id IS NULL
-    AND kind IN ('loan','mortgage') AND bank_account_id IS NOT NULL`).all() as ScheduledItem[];
-  const dismiss = db.prepare(`UPDATE scheduled_items SET status = 'dismissed' WHERE id = ?`);
-  const setPattern = db.prepare(`UPDATE scheduled_items SET match_pattern = ? WHERE id = ?`);
-  const near = (a: number, b: number, tol: number) => Math.abs(Math.abs(a) - Math.abs(b)) <= Math.abs(b) * tol;
-  // does a pattern match any recent outflow on the account? (the forecast uses it to see a payment already went out)
-  const recent = db.prepare(`SELECT description FROM transactions WHERE account_id = ? AND charged_amount < 0 AND date >= date('now', '-120 days')`).pluck();
-  const matchesStatement = (accountId: string, pattern: string | null) =>
-    !!pattern && (recent.all(accountId) as string[]).some(d => merchantKey(d).includes(pattern) || d.includes(pattern));
-  let superseded = 0;
-
-  db.transaction(() => {
-    for (const d of detected) {
-      const sameAccount = manual.filter(m => m.bank_account_id === d.bank_account_id);
-      const single = sameAccount.find(m => m.kind === d.kind && near(m.amount, d.amount, 0.05))
-        // a car loan entered as "loan" may have been detected as either kind
-        ?? sameAccount.find(m => near(m.amount, d.amount, 0.05));
-      const tracks = sameAccount.filter(m => m.kind === d.kind);
-      const tracksTotal = tracks.reduce((s, m) => s + m.amount, 0);
-      const covering = single ? [single] : tracks.length > 1 && near(tracksTotal, d.amount, 0.15) ? tracks : [];
-      if (!covering.length) continue;
-      if (d.status !== 'dismissed') { dismiss.run(d.id); superseded++; }
-      // the user's items take the bank's description when theirs never appears on the statement
-      const bankPattern = d.match_pattern ?? merchantKey(d.name);
-      for (const m of covering) {
-        if (!matchesStatement(m.bank_account_id!, m.match_pattern) && matchesStatement(m.bank_account_id!, bankPattern)) setPattern.run(bankPattern, m.id);
-      }
-    }
-  })();
-  return superseded;
-}
-
 
 export interface RecurringTransfer {
   from: string; to: string; fromName: string; toName: string;

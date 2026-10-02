@@ -38,18 +38,16 @@ a live stock portfolio, and an optional AI chat that answers questions about you
 | Page | What you get |
 |---|---|
 | **סקירה** (Overview) | Bank balances now, the expected balance at the end of the month and its lowest point, this month's spend vs. your average, card charges still to come, budget status, alerts. A **scrape button** that runs the bank scrape from the browser — including entering an SMS / OTP code when the bank asks. |
-| **תנועות** (Transactions) | Every bank and card row, searchable and filterable. Edit category, member, tags, business share; "apply to similar" turns an edit into a rule. Add manual rows (cash, something paid by someone else). |
+| **תנועות** (Transactions) | Every bank and card row, searchable and filterable. Edit category, member, tags; "apply to similar" turns an edit into a rule. Add manual rows (cash, something paid by someone else). |
 | **קבועות החודש** (Fixed this month) | Salaries, standing orders, loans, subscriptions and card estimates for the month — which already arrived and which are still expected. |
 | **תקציב** (Budget) | Monthly budgets per category with progress, plus planned one-off expenses before they're charged. |
 | **מגמות הוצאות** (Spending trends) | Per-category spend over months, drill-down into merchants. |
 | **תזרים ותחזית** (Cash flow & forecast) | Income vs. fixed vs. variable spend per month; a day-by-day balance forecast per bank account that knows your card statement dates, installments and recurring payments. |
 | **תובנות והתראות** (Insights) | Detected subscriptions and price changes, unusual charges, savings capacity, a plan for a tight month. |
 | **אירועים ותגיות** (Events & tags) | Tag a trip, a wedding or a renovation and see what it really cost. |
-| **עסקים** (Businesses) | Mark expenses as (partly) business — they're excluded from household totals and reported per business. |
-| **חסכונות והון** (Savings & net worth) | Bank savings, deposits, pension, study funds, brokerage, real estate, minus loans and open card charges = net worth, over time. Sinking funds with goals. |
+| **חסכונות והון** (Savings & net worth) | Bank savings, deposits, pension, study funds, brokerage, real estate, minus open card charges = net worth, over time. Sinking funds with goals. |
 | **השקעות** (Investments) | Stock-market holdings at **live prices** (Yahoo Finance — US, TASE, London, crypto…). Value in ₪, gain vs. the buy price (including the exchange-rate effect), today's change, allocation and value history. Holdings without a buy price start from today's price. Counts in net worth. |
 | **פנסיה וגמל** (Pension) | Pension funds, managers' insurance, study funds (קרנות השתלמות) and provident funds (קופות גמל): balance, fees, tracks and returns, deposits per month, expected pension, which study funds are already liquid. |
-| **הלוואות ומשכנתא** (Loans) | Loans and mortgage tracks, balances and repayments matched from the bank rows. |
 | **ביטוחים** (Insurance) | Every policy with premium, coverage, renewal date and documents (PDF / images). What each policy *actually* cost in the last 12 months (matched from card / bank charges), and insurance charges with no policy yet. |
 | **✨ data chat** | Ask in Hebrew: "כמה הוצאנו על סופר החודש?", "מה מכסה ביטוח הבריאות שלי?", "תן לי סקירה של התיק". Answers come from your own database and documents — see [below](#the-ai-data-chat-optional). |
 
@@ -90,7 +88,7 @@ npm run dev:demo       # API on 127.0.0.1:4310 + web app on http://127.0.0.1:518
 ```
 
 Open <http://127.0.0.1:5180>. The demo is a two-person household with five months of invented transactions, two bank
-accounts, two cards, a mortgage, savings and a small stock portfolio. Delete `demo.db` whenever you like.
+accounts, two cards, a mortgage payment, savings and a small stock portfolio. Delete `demo.db` whenever you like.
 
 ## Setup with your own banks
 

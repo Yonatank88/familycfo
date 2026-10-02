@@ -130,38 +130,6 @@ export function analyticsRoutes(app: FastifyInstance, db: DB): void {
     return netWorth(db);
   });
 
-  // ---- businesses ---------------------------------------------------------------------------
-  app.get('/api/businesses/:id/report', async req => {
-    const id = Number((req.params as { id: string }).id);
-    const q = req.query as Q;
-    const txs = loadTransactions(db, { from: q.from, to: q.to }).filter(t => t.businessId === id);
-    const months = new Map<string, { income: number; expenses: number }>();
-    for (const t of txs) {
-      const m = months.get(t.effectiveDate.slice(0, 7)) ?? { income: 0, expenses: 0 };
-      if (t.businessAmount > 0) m.income += t.businessAmount; else m.expenses += -t.businessAmount;
-      months.set(t.effectiveDate.slice(0, 7), m);
-    }
-    return {
-      transactions: txs.sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate)),
-      months: [...months.entries()].sort().map(([month, v]) => ({ month, ...v })),
-      totals: {
-        income: txs.filter(t => t.businessAmount > 0).reduce((s, t) => s + t.businessAmount, 0),
-        expenses: txs.filter(t => t.businessAmount < 0).reduce((s, t) => s - t.businessAmount, 0),
-      },
-    };
-  });
-
-  app.get('/api/businesses/:id/export.csv', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
-    const q = req.query as Q;
-    const rows = loadTransactions(db, { from: q.from, to: q.to }).filter(t => t.businessId === id);
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const csv = ['date,charge_date,description,category,amount_ils,business_amount_ils,notes',
-      ...rows.map(t => [t.date, t.processedDate, t.description, t.categoryName, t.amount.toFixed(2), t.businessAmount.toFixed(2), t.notes].map(esc).join(','))];
-    reply.header('content-type', 'text/csv; charset=utf-8');
-    return '﻿' + csv.join('\n');
-  });
-
   // ---- operations -------------------------------------------------------------------------
   app.post('/api/pipeline', async () => runPipeline(db, { txIds: [] }));
 

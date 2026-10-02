@@ -27,14 +27,12 @@ export interface CycleSummary {
   txCount: number;
   byCategory: CategorySpend[];
   byMember: Record<number, { income: number; spend: number }>;
-  byBusiness: Record<number, { income: number; spend: number }>;
 }
 
 export function summarizeCycle(txs: Tx[], cycle: Cycle): CycleSummary {
   const inCycle = txs.filter(t => t.effectiveDate >= cycle.start && t.effectiveDate <= cycle.end);
   const cats = new Map<string, CategorySpend>();
   const byMember: CycleSummary['byMember'] = {};
-  const byBusiness: CycleSummary['byBusiness'] = {};
   let income = 0, spend = 0, fixed = 0, savingsDeposits = 0;
 
   for (const t of inCycle) {
@@ -56,11 +54,6 @@ export function summarizeCycle(txs: Tx[], cycle: Cycle): CycleSummary {
     const m = (byMember[t.memberId] ??= { income: 0, spend: 0 });
     m.income += inc;
     m.spend += s;
-    if (t.businessId != null) {
-      const b = (byBusiness[t.businessId] ??= { income: 0, spend: 0 });
-      if (t.kind === 'expense') b.spend += -t.businessAmount;
-      if (t.kind === 'income') b.income += t.businessAmount;
-    }
   }
 
   const r = (o: Record<number, { income: number; spend: number }>) =>
@@ -77,7 +70,6 @@ export function summarizeCycle(txs: Tx[], cycle: Cycle): CycleSummary {
     byCategory: [...cats.values()].map(c => ({ ...c, spend: round(c.spend), fixed: round(c.fixed), dynamic: round(c.dynamic) }))
       .sort((a, b) => b.spend - a.spend),
     byMember: r(byMember),
-    byBusiness: r(byBusiness),
   };
 }
 

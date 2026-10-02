@@ -7,7 +7,7 @@ import { holdingValues, portfolioHistory } from './investments.js';
 export interface NetWorthItem {
   id: string;
   name: string;
-  group: 'bank' | 'asset' | 'card_debt' | 'liability';
+  group: 'bank' | 'asset' | 'card_debt';
   type: string;
   ownerMemberId: number | null;
   provider: string | null;
@@ -27,7 +27,7 @@ export interface NetWorth {
   history: { date: string; netWorth: number }[];
 }
 
-/** Net worth (#7, #17): bank + manual assets + stock holdings − open card charges − loans, all in ILS. */
+/** Net worth (#7, #17): bank + manual assets + stock holdings − open card charges, all in ILS. */
 export function netWorth(db: DB, asOf = today()): NetWorth {
   const items: NetWorthItem[] = [];
 
@@ -78,17 +78,6 @@ export function netWorth(db: DB, asOf = today()): NetWorth {
       provider: c.id.split(':')[0], currency: 'ILS', value: c.pending, valueIls: round(c.pending), asOf, liquidityDate: null });
   }
 
-  const liabilities = db.prepare(`
-    SELECT l.*, s.balance, s.date AS snap_date FROM liabilities l
-    LEFT JOIN liability_snapshots s ON s.id = (SELECT id FROM liability_snapshots WHERE liability_id = l.id ORDER BY date DESC, id DESC LIMIT 1)
-    WHERE l.archived = 0
-  `).all() as Record<string, any>[];
-  for (const l of liabilities) {
-    const balance = -(l.balance ?? l.original_principal ?? 0);
-    items.push({ id: `liability:${l.id}`, name: l.name, group: 'liability', type: l.type, ownerMemberId: l.owner_member_id,
-      provider: l.lender, currency: 'ILS', value: balance, valueIls: balance, asOf: l.snap_date, liquidityDate: l.end_date });
-  }
-
   const assetsTotal = items.filter(i => i.valueIls > 0).reduce((s, i) => s + i.valueIls, 0);
   const liabilitiesTotal = items.filter(i => i.valueIls < 0).reduce((s, i) => s + i.valueIls, 0);
   // pension and real estate are never liquid; a provident fund (gemel) only from the date it's set to
@@ -110,11 +99,10 @@ export function netWorth(db: DB, asOf = today()): NetWorth {
   };
 }
 
-/** Month-end net worth from asset/liability snapshots, the bank balance history and the holdings' daily closes. */
+/** Month-end net worth from asset snapshots, the bank balance history and the holdings' daily closes. */
 function netWorthHistory(db: DB): { date: string; netWorth: number }[] {
   const months = db.prepare(`
     SELECT DISTINCT substr(date, 1, 7) AS m FROM asset_snapshots
-    UNION SELECT DISTINCT substr(date, 1, 7) FROM liability_snapshots
     UNION SELECT DISTINCT substr(timestamp, 1, 7) FROM balances
     ORDER BY m
   `).pluck().all() as string[];
@@ -132,10 +120,6 @@ function netWorthHistory(db: DB): { date: string; netWorth: number }[] {
       WHERE s.id IN (SELECT MAX(id) FROM asset_snapshots WHERE date <= ? GROUP BY asset_id)
     `).all(end) as { value: number; currency: string; date: string }[])
       .reduce((sum, s) => sum + toIls(db, s.value, s.currency, s.date), 0);
-    const debts = db.prepare(`
-      SELECT COALESCE(SUM(balance), 0) FROM liability_snapshots
-      WHERE id IN (SELECT MAX(id) FROM liability_snapshots WHERE date <= ? GROUP BY liability_id)
-    `).pluck().get(end) as number;
-    return { date: m, netWorth: round(bank + assets + stocksOn(end) - debts) };
+    return { date: m, netWorth: round(bank + assets + stocksOn(end)) };
   });
 }

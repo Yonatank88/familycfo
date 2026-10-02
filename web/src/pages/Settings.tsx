@@ -112,13 +112,12 @@ export default function Settings() {
       <Section title="כללי סיווג" icon={Wand2} color="var(--chart-5)" subtitle="נוצרים כשבוחרים ״החל על תנועות דומות״. חלים על תנועות חדשות בכל סריקה.">
         {(rules.data ?? []).length === 0 ? <div className="text-sm text-zinc-500">אין כללים עדיין</div> : (
           <div className="scroll-x card-bleed"><table className="table">
-            <thead><tr><th>כשהתיאור</th><th>קטגוריה</th><th>עסק</th><th>שייך ל</th><th /></tr></thead>
+            <thead><tr><th>כשהתיאור</th><th>קטגוריה</th><th>שייך ל</th><th /></tr></thead>
             <tbody>
               {rules.data!.map(r => (
                 <tr key={r.id}>
                   <td>{r.matchType === 'exact' ? 'שווה ל' : 'מכיל'} <b>{r.pattern}</b></td>
                   <td>{category(r.setCategoryId)?.name ?? '—'}</td>
-                  <td>{meta.businesses.find(b => b.id === r.setBusinessId)?.name ?? '—'}{r.setBusinessSharePct && r.setBusinessSharePct !== 100 ? ` (${r.setBusinessSharePct}%)` : ''}</td>
                   <td>{meta.members.find(m => m.id === r.setMemberId)?.name ?? '—'}</td>
                   <td><button className="btn-ghost text-rose-600 hover:text-rose-700 dark:text-rose-400" onClick={() => remove.mutate(`/rules/${r.id}`)}>מחק</button></td>
                 </tr>

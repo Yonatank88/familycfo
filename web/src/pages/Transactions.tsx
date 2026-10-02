@@ -9,15 +9,15 @@ import { api, qs, type Tx } from '../api';
 import { useFilters, useLookups } from '../state';
 import { day, KIND_LABELS, monthName, todayIso } from '../format';
 import {
-  AccountSelect, AnimatedNumber, BusinessSelect, CategorySelect, Empty, ErrorBox, Field, Loading, MemberSelect, Modal, Money,
+  AccountSelect, AnimatedNumber, CategorySelect, Empty, ErrorBox, Field, Loading, MemberSelect, Modal, Money,
   NewTagInput, PageHeader, Picker, Stat, TagPicker, type PickerOption,
 } from '../components/ui';
 import { CategoryReport } from '../components/CategoryReport';
 import { ManualEntry } from '../components/ManualEntry';
 import { MemberAvatar } from '@/lib/visuals';
 
-interface TxPage { total: number; totals: { income: number; spend: number; businessIncome: number; businessSpend: number; moved: number }; rows: Tx[] }
-type SortKey = 'date' | 'description' | 'amount' | 'category' | 'member' | 'business' | 'account';
+interface TxPage { total: number; totals: { income: number; spend: number; moved: number }; rows: Tx[] }
+type SortKey = 'date' | 'description' | 'amount' | 'category' | 'member' | 'account';
 
 const KIND_ICONS: Record<string, ReactNode> = {
   expense: <ShoppingBag />, income: <TrendingUp />, refund: <Undo2 />, transfer: <ArrowLeftRight />,
@@ -37,7 +37,7 @@ function cycleOptions(n = 12): string[] {
 
 export default function Transactions() {
   const { params } = useFilters();
-  const { member, business, tag, meta } = useLookups();
+  const { member, tag, meta } = useLookups();
   const qc = useQueryClient();
   // filters can arrive in the URL (e.g. clicking a category on the dashboard)
   const [urlParams, setUrlParams] = useSearchParams();
@@ -81,8 +81,8 @@ export default function Transactions() {
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) => api.patch<Tx>(`/transactions/${id}`, body),
     onSuccess: async (_res, { id, body }) => {
       invalidate();
-      // offer "apply to all similar" for category / business / member edits
-      if ('categoryId' in body || 'businessId' in body || 'memberId' in body) {
+      // offer "apply to all similar" for category / member edits
+      if ('categoryId' in body || 'memberId' in body) {
         const similar = await api.get<{ count: number }>(`/transactions/${id}/similar`);
         const tx = data?.rows.find(r => r.id === id);
         if (similar.count > 0 && tx) setSuggestRule({ tx, patch: body, count: similar.count });
@@ -99,8 +99,6 @@ export default function Transactions() {
     mutationFn: ({ tx, patchBody }: { tx: Tx; patchBody: Record<string, unknown> }) => api.post<{ applied: number }>('/rules', {
       fromTransactionId: tx.id,
       setCategoryId: patchBody.categoryId ?? undefined,
-      setBusinessId: patchBody.businessId ?? undefined,
-      setBusinessSharePct: patchBody.businessSharePct ?? undefined,
       setMemberId: patchBody.memberId ?? undefined,
     }),
     onSuccess: () => { invalidate(); setSuggestRule(null); },
@@ -115,7 +113,6 @@ export default function Transactions() {
         case 'amount': return t.amount;
         case 'category': return t.categoryName ?? '';
         case 'member': return member(t.memberId)?.name ?? '';
-        case 'business': return business(t.businessId)?.name ?? '';
         case 'account': return t.accountName ?? '';
       }
     };
@@ -124,7 +121,7 @@ export default function Transactions() {
       const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), 'he');
       return (cmp || b.id - a.id) * sort.dir;
     });
-  }, [data, sort, member, business]);
+  }, [data, sort, member]);
   const sortHeader = (key: SortKey, label: string, className = '') => (
     <th className={`cursor-pointer select-none transition-colors duration-(--duration-fast) hover:text-fg ${sort.key === key ? 'text-fg' : ''} ${className}`}
       aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
@@ -163,10 +160,10 @@ export default function Transactions() {
             value={<AnimatedNumber value={data.total} format={formatCount} className="num" />}
             hint={data.totals.moved > 0 ? <>מתוכן העברות, חסכונות ותשלומי כרטיס <Money value={data.totals.moved} /> — לא נספרים</> : undefined} />
           <Stat index={1} label="הכנסות" icon={ArrowDownLeft} tone="good" value={data.totals.income}
-            hint={data.totals.businessIncome > 0 ? <>ועוד <Money value={data.totals.businessIncome} /> הכנסות עסק</> : 'חלק הבית, בלי העברות בין חשבונות'} />
+            hint="בלי העברות בין חשבונות" />
           <Stat index={2} label="הוצאות" icon={ArrowUpRight} tone="bad" value={data.totals.spend}
             hint={<button type="button" className="hover:underline" onClick={() => setShowCategories(true)}>
-              {data.totals.businessSpend > 0 ? <>ועוד <Money value={data.totals.businessSpend} /> של העסק · </> : null}לפי קטגוריות ←
+              לפי קטגוריות ←
             </button>} />
           <Stat index={3} label="נטו" icon={Scale} color="var(--chart-6)"
             value={<Money value={data.totals.income - data.totals.spend} colored animated />} hint="הכנסות פחות הוצאות" />
@@ -206,7 +203,6 @@ export default function Transactions() {
           <span className="min-w-14 px-1 text-sm font-semibold tabular-nums text-brand-800 dark:text-brand-100">{selected.size} נבחרו</span>
           <CategorySelect className="input w-44 max-sm:w-[calc(50%-0.25rem)]" value={null} onChange={id => bulk.mutate({ categoryId: id })} />
           <MemberSelect className="input w-36 max-sm:w-[calc(50%-0.25rem)]" value={null} emptyLabel="שייך לבן משפחה…" onChange={id => bulk.mutate({ memberId: id })} />
-          <BusinessSelect className="input w-40 max-sm:w-[calc(50%-0.25rem)]" value={null} onChange={id => bulk.mutate({ businessId: id })} />
           <Picker className="input w-36 max-sm:w-[calc(50%-0.25rem)]" value="" options={tagOptions} placeholder="+ תגית"
             onChange={v => v && bulk.mutate({ addTagIds: [Number(v)] })} />
           <NewTagInput placeholder="תגית חדשה + Enter" onCreated={t => bulk.mutate({ addTagIds: [t.id] })} />
@@ -232,7 +228,6 @@ export default function Transactions() {
                 {sortHeader('amount', 'סכום', 'text-end')}
                 {sortHeader('category', 'קטגוריה')}
                 {sortHeader('member', 'שייך ל')}
-                {sortHeader('business', 'עסק')}
                 {sortHeader('account', 'חשבון')}
                 <th />
               </tr>
@@ -279,12 +274,6 @@ export default function Transactions() {
                       onChange={v => v && patch.mutate({ id: t.id, body: { memberId: Number(v) } })}
                       style={{ color: member(t.memberId)?.color ?? undefined }} />
                   </td>
-                  <td className="min-w-40">
-                    <BusinessSelect className="input py-1" value={t.businessId} onChange={id => patch.mutate({ id: t.id, body: { businessId: id } })} />
-                    {t.businessId && t.businessAmount !== t.amount && (
-                      <div className="text-[11px] text-zinc-500">{business(t.businessId)?.name}: <Money value={t.businessAmount} /></div>
-                    )}
-                  </td>
                   <td className="whitespace-nowrap text-xs text-zinc-500">{t.accountName}</td>
                   <td><button className="btn-ghost btn-icon" aria-label="עריכה" onClick={() => (t.accountKind === 'manual' ? setManual(t) : setEditing(t))}><MoreHorizontal /></button></td>
                 </tr>
@@ -319,8 +308,7 @@ export default function Transactions() {
 
 function TxDrawer({ tx, onClose, onSave }: { tx: Tx; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
   const [form, setForm] = useState({
-    categoryId: tx.categoryId, memberId: tx.memberId, businessId: tx.businessId,
-    businessSharePct: tx.businessId ? Math.round((tx.businessAmount / (tx.amount || 1)) * 100) : 100,
+    categoryId: tx.categoryId, memberId: tx.memberId,
     kind: tx.kind, fixedOverride: tx.fixed ? 1 : 0, excluded: tx.excluded ? 1 : 0, notes: tx.notes ?? '', tagIds: tx.tagIds,
   });
   const set = (patch: Partial<typeof form>) => setForm(f => ({ ...f, ...patch }));
@@ -338,13 +326,6 @@ function TxDrawer({ tx, onClose, onSave }: { tx: Tx; onClose: () => void; onSave
         <Field label="שייך ל"><MemberSelect value={form.memberId} onChange={memberId => set({ memberId: memberId ?? tx.memberId })} /></Field>
         <Field label="סוג">
           <Picker className="input" value={form.kind} options={kindOptions()} searchable={false} onChange={v => v && set({ kind: v })} />
-        </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="עסק"><BusinessSelect value={form.businessId} onChange={businessId => set({ businessId })} /></Field>
-        <Field label="חלק עסקי (%)">
-          <input className="input" type="number" min={0} max={100} disabled={!form.businessId} value={form.businessSharePct}
-            onChange={e => set({ businessSharePct: Number(e.target.value) })} />
         </Field>
       </div>
       <Field label="תגיות"><TagPicker value={form.tagIds} onChange={tagIds => set({ tagIds })} /></Field>

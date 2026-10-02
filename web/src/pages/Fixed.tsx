@@ -212,7 +212,6 @@ export default function Fixed() {
                     </td>
                     <td className="min-w-32 text-xs text-muted-foreground">
                       {c.method === 'card' ? <>בכרטיס {accountName(c.accountId)}<div className="text-[11px]">נכלל בחיוב הכרטיס</div></> : <>מהבנק {accountName(c.accountId)}</>}
-                      {c.liabilityId && <div><Link className="text-brand-600 hover:underline" to="/loans">מההלוואות</Link></div>}
                     </td>
                     <td><MemberBadge id={c.memberId} /></td>
                     <td className="whitespace-nowrap text-sm">{day(c.dueDate)}</td>

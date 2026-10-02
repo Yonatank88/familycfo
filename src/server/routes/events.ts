@@ -5,7 +5,7 @@ import { toApi } from '../crud.js';
 
 interface TagRow { id: number; name: string; color: string | null; start_date: string | null; end_date: string | null; budget: number | null; notes: string | null; archived: number }
 
-/** Net cost of an event row: spend minus refunds (both already net of the business share). */
+/** Net cost of an event row: spend minus refunds. */
 const costOf = (t: Tx) => spendOf(t) - refundOf(t);
 
 function summarize(txs: Tx[]) {

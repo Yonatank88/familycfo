@@ -19,12 +19,8 @@ export interface Tx {
   effectiveDate: string;
   description: string;
   merchant: string;
-  /** signed ILS amount of the whole transaction */
+  /** signed ILS amount */
   amount: number;
-  /** portion that belongs to the household (amount minus the business share) */
-  personalAmount: number;
-  /** portion assigned to a business */
-  businessAmount: number;
   kind: string;
   categoryId: number | null;
   categoryName: string | null;
@@ -35,7 +31,6 @@ export interface Tx {
   fixed: boolean;
   discretionary: boolean;
   memberId: number;
-  businessId: number | null;
   status: string | null;
   txnType: string | null;
   installmentNumber: number | null;
@@ -146,7 +141,6 @@ export function loadTransactions(db: DB, opts: LoadOptions = {}): Tx[] {
 
     const rate = rateToIls(db, normalizeCurrency(r.charged_currency), processedDate) ?? 1;
     const amount = r.charged_amount * rate;
-    const share = r.business_id ? Math.min(100, Math.max(0, r.business_share_pct ?? 100)) / 100 : 0;
     const merchant = merchantKey(r.description);
     const fixed = r.fixed_override != null
       ? !!r.fixed_override
@@ -164,8 +158,6 @@ export function loadTransactions(db: DB, opts: LoadOptions = {}): Tx[] {
       description: r.description,
       merchant,
       amount,
-      personalAmount: amount * (1 - share),
-      businessAmount: amount * share,
       kind: r.kind ?? (amount < 0 ? 'expense' : 'income'),
       categoryId: r.category_id,
       categoryName: r.category_name,
@@ -175,7 +167,6 @@ export function loadTransactions(db: DB, opts: LoadOptions = {}): Tx[] {
       fixed,
       discretionary: r.discretionary == null ? true : !!r.discretionary && !fixed,
       memberId: r.member_id ?? r.owner_member_id ?? SHARED_MEMBER_ID,
-      businessId: r.business_id,
       status: r.status,
       txnType: r.txn_type,
       installmentNumber: r.installment_number,
@@ -196,7 +187,6 @@ export function loadTransactions(db: DB, opts: LoadOptions = {}): Tx[] {
 
 export interface TxFilter {
   memberId?: number;
-  businessId?: number;
   tagIds?: number[];
   categoryId?: number;
   accountId?: string;
@@ -207,7 +197,6 @@ export function filterTx(txs: Tx[], f: TxFilter): Tx[] {
   const q = f.search?.trim().toLowerCase();
   return txs.filter(t =>
     (f.memberId == null || t.memberId === f.memberId) &&
-    (f.businessId == null || t.businessId === f.businessId) &&
     (!f.tagIds?.length || f.tagIds.every(id => t.tagIds.includes(id))) &&
     // a parent category includes its sub-categories
     (f.categoryId == null || t.categoryId === f.categoryId || t.categoryParentId === f.categoryId) &&
@@ -215,22 +204,22 @@ export function filterTx(txs: Tx[], f: TxFilter): Tx[] {
     (!q || t.description.toLowerCase().includes(q) || (t.notes ?? '').toLowerCase().includes(q)));
 }
 
-/** Household spend of one row, net of confirmed paybacks (positive number, 0 for non-spend). */
+/** Spend of one row, net of confirmed paybacks (positive number, 0 for non-spend). */
 export function spendOf(t: Tx): number {
   if (t.kind !== 'expense') return 0;
-  return Math.max(0, -t.personalAmount - t.paybackTotal * (t.personalAmount / (t.amount || 1)));
+  return Math.max(0, -t.amount - t.paybackTotal);
 }
 
-/** Household income of one row (positive), excluding linked paybacks. */
+/** Income of one row (positive), excluding linked paybacks. */
 export function incomeOf(t: Tx): number {
   if (t.linkedInflow) return 0;
-  if (t.kind === 'income') return Math.max(0, t.personalAmount);
+  if (t.kind === 'income') return Math.max(0, t.amount);
   return 0;
 }
 
 /** Refunds reduce spend in their category. */
 export function refundOf(t: Tx): number {
-  return t.kind === 'refund' && !t.linkedInflow ? Math.max(0, t.personalAmount) : 0;
+  return t.kind === 'refund' && !t.linkedInflow ? Math.max(0, t.amount) : 0;
 }
 
 // ---- dates & cycles --------------------------------------------------------------------

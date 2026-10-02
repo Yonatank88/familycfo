@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { CreditCard, Home, Landmark, Plus, Receipt, TrendingUp, X } from 'lucide-react';
@@ -41,7 +40,7 @@ export function ScheduledManager() {
         כל פריט פעיל נכנס לתחזית היתרה ביום שלו בחודש, מהחשבון שלו — אלא אם כבר ירד החודש (מזוהה לפי ״תיאור בדף הבנק״).
         אומדן חיוב כרטיס משמש רק כשהכרטיס עוד לא דיווח על החיוב. פריטים שהוסרו לא נספרים בשום חישוב.
       </p>
-      {incomeAndCards.length > 0 && <div className="scroll-x card-bleed"><ScheduledTable items={incomeAndCards} all={all} onPatch={onPatch} /></div>}
+      {incomeAndCards.length > 0 && <div className="scroll-x card-bleed"><ScheduledTable items={incomeAndCards} onPatch={onPatch} /></div>}
       <div className="mt-3 flex flex-wrap gap-2">
         <button className="btn" onClick={() => create.mutate({ name: 'הכנסה חדשה', kind: 'income', amount: 1000, dayOfMonth: 1, bankAccountId: firstBank, status: 'confirmed' })}>
           <Plus />הכנסה קבועה
@@ -50,13 +49,13 @@ export function ScheduledManager() {
       {payments.length > 0 && (
         <details className="mt-4">
           <summary className="cursor-pointer text-sm text-muted-foreground">עריכה מתקדמת של תשלומים מהבנק — יום, חשבון, זיהוי ({payments.length})</summary>
-          <div className="scroll-x card-bleed"><ScheduledTable items={payments} all={all} onPatch={onPatch} /></div>
+          <div className="scroll-x card-bleed"><ScheduledTable items={payments} onPatch={onPatch} /></div>
         </details>
       )}
       {dismissed.length > 0 && (
         <details className="mt-3">
           <summary className="cursor-pointer text-sm text-muted-foreground">הוסרו — לא נספרים בחישובים ({dismissed.length})</summary>
-          <div className="scroll-x card-bleed"><ScheduledTable items={dismissed} all={all} dismissed onPatch={onPatch} /></div>
+          <div className="scroll-x card-bleed"><ScheduledTable items={dismissed} dismissed onPatch={onPatch} /></div>
         </details>
       )}
     </>
@@ -64,17 +63,13 @@ export function ScheduledManager() {
 }
 
 /** Where a scheduled item comes from, and (for removed ones) why it doesn't count. */
-function sourceOf(s: ScheduledItem, all: ScheduledItem[]): { label: string; to?: string; why?: string } {
-  if (s.liabilityId) return { label: 'מההלוואות שהגדרתם', to: '/loans' };
+function sourceOf(s: ScheduledItem): { label: string; why?: string } {
   if (s.kind === 'card_charge') return { label: 'חיוב כרטיס', why: 'הסכום משמש רק כשהכרטיס עוד לא דיווח על החיוב; כשיש פירוט — נספר הסכום האמיתי' };
-  const coveredByLoans = (s.kind === 'loan' || s.kind === 'mortgage')
-    && all.some(o => o.liabilityId && o.status !== 'dismissed' && o.bankAccountId === s.bankAccountId);
-  if (s.status === 'dismissed' && coveredByLoans) return { label: 'זוהה מהיסטוריית הבנק', why: 'כפילות של ההלוואות שהגדרתם — ההלוואות נספרות במקומו' };
   return { label: 'זוהה מהיסטוריית הבנק' };
 }
 
-function ScheduledTable({ items, all, dismissed, onPatch }: {
-  items: ScheduledItem[]; all: ScheduledItem[]; dismissed?: boolean; onPatch: (path: string, body: Record<string, unknown>) => void;
+function ScheduledTable({ items, dismissed, onPatch }: {
+  items: ScheduledItem[]; dismissed?: boolean; onPatch: (path: string, body: Record<string, unknown>) => void;
 }) {
   return (
     <table className={`table ${dismissed ? 'mt-3 opacity-70' : ''}`}>
@@ -83,12 +78,12 @@ function ScheduledTable({ items, all, dismissed, onPatch }: {
       <tbody>
         {items.map(s => {
           const path = `/scheduled/${s.id}`;
-          const src = sourceOf(s, all);
+          const src = sourceOf(s);
           return (
             <tr key={s.id} className={s.status === 'suggested' ? 'bg-amber-50/50 dark:bg-amber-950/10' : ''}>
               <td className="min-w-44"><input className="input py-1" defaultValue={s.name} onBlur={e => e.target.value !== s.name && onPatch(path, { name: e.target.value })} /></td>
               <td className="min-w-32 text-xs">
-                {src.to ? <Link className="text-brand-600 hover:underline" to={src.to}>{src.label}</Link> : <span className="text-zinc-500">{src.label}</span>}
+                <span className="text-zinc-500">{src.label}</span>
                 {src.why && <div className="text-[11px] text-zinc-500">{src.why}</div>}
               </td>
               <td className="min-w-32"><Picker className="input py-1" value={s.kind} options={SCHEDULED_KIND_OPTIONS} searchable={false}

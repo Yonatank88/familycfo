@@ -4,21 +4,20 @@ export interface Account {
   billingBankAccountId: string | null; cardFrame: number | null; active: number; lastScrapedAt: string | null;
 }
 export interface Category { id: number; name: string; parentId: number | null; kind: string; defaultFixed: number; discretionary: number }
-export interface Business { id: number; name: string; color: string | null; archived: number }
 export interface Tag {
   id: number; name: string; color: string | null; startDate: string | null; endDate: string | null;
   budget: number | null; notes: string | null; archived: number;
 }
 export interface Fund { id: number; name: string; monthlyTarget: number; balance: number; goalAmount: number | null; goalDate: string | null }
 export interface Meta {
-  members: Member[]; accounts: Account[]; categories: Category[]; businesses: Business[]; tags: Tag[]; funds: Fund[];
+  members: Member[]; accounts: Account[]; categories: Category[]; tags: Tag[]; funds: Fund[];
   settings: Record<string, string>;
 }
 
 export interface Tx {
   id: number; accountId: string; accountName?: string; accountKind: 'bank' | 'card' | 'manual'; date: string; processedDate: string;
-  effectiveDate: string; description: string; merchant: string; amount: number; personalAmount: number; businessAmount: number;
-  kind: string; categoryId: number | null; categoryName: string | null; categoryParentId?: number | null; categoryParentName?: string | null; fixed: boolean; memberId: number; businessId: number | null;
+  effectiveDate: string; description: string; merchant: string; amount: number;
+  kind: string; categoryId: number | null; categoryName: string | null; categoryParentId?: number | null; categoryParentName?: string | null; fixed: boolean; memberId: number;
   status: string | null; txnType: string | null; installmentNumber: number | null; installmentTotal: number | null;
   tagIds: number[]; paybackTotal: number; linkedInflow: boolean; categorySource: string | null; notes: string | null; excluded?: boolean;
   matchedTxnId?: number | null; settledByTxnId?: number | null;
@@ -31,7 +30,6 @@ export interface CategorySpend { categoryId: number | null; name: string; parent
 export interface CycleSummary {
   cycle: Cycle; income: number; spend: number; fixed: number; dynamic: number; net: number; savingsDeposits: number; txCount: number;
   byCategory: CategorySpend[]; byMember: Record<string, { income: number; spend: number }>;
-  byBusiness: Record<string, { income: number; spend: number }>;
 }
 export interface BudgetStatus {
   budgetId: number | null; categoryId: number; categoryName: string; parentId: number | null; memberId: number | null; budget: number | null;
@@ -104,11 +102,11 @@ export interface InstallmentPlan {
 export interface ScheduledItem {
   id: number; name: string; kind: string; amount: number; amountMode: 'fixed' | 'estimated'; dayOfMonth: number;
   bankAccountId: string | null; memberId: number | null; categoryId: number | null; matchPattern: string | null;
-  cardAccountId: string | null; liabilityId: number | null; startDate: string | null; endDate: string | null;
+  cardAccountId: string | null; startDate: string | null; endDate: string | null;
   status: 'suggested' | 'confirmed' | 'dismissed';
 }
 export interface NetWorthItem {
-  id: string; name: string; group: 'bank' | 'asset' | 'card_debt' | 'liability'; type: string; ownerMemberId: number | null;
+  id: string; name: string; group: 'bank' | 'asset' | 'card_debt'; type: string; ownerMemberId: number | null;
   provider: string | null; currency: string; value: number; valueIls: number; asOf: string | null; liquidityDate: string | null;
 }
 export interface NetWorth {
@@ -119,19 +117,13 @@ export interface Asset {
   id: number; name: string; type: string; provider: string | null; ownerMemberId: number | null; currency: string;
   liquidityDate: string | null; managementFee: string | null; monthlyDeposit: number | null; notes: string | null; archived: number;
 }
-export interface Liability {
-  id: number; name: string; type: string; lender: string | null; ownerMemberId: number | null; originalPrincipal: number | null;
-  interestRate: number | null; indexType: string | null; startDate: string | null; endDate: string | null;
-  monthlyPayment: number | null; paymentDay: number | null; bankAccountId: string | null; matchPattern: string | null;
-  notes: string | null; archived: number;
-}
 export interface Link {
   id: number; fromTxnId: number; toTxnId: number; type: string; amount: number; status: string;
   fromDescription: string; fromDate: string; fromAmount: number; toDescription: string; toDate: string; toAmount: number;
 }
 export interface Rule {
   id: number; matchType: string; pattern: string; accountId: string | null; setCategoryId: number | null;
-  setBusinessId: number | null; setBusinessSharePct: number | null; setMemberId: number | null; setKind: string | null; setTagIds: string | null;
+  setMemberId: number | null; setKind: string | null; setTagIds: string | null;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -171,7 +163,7 @@ export interface Commitment {
   categoryId: number | null; categoryName: string | null; parentId: number | null; parentName: string | null;
   method: 'bank' | 'card'; accountId: string; memberId: number | null; day: number; dueDate: string;
   expected: number; actual: number; state: 'paid' | 'partial' | 'pending' | 'missing'; txIds: number[];
-  estimated: boolean; liabilityId: number | null;
+  estimated: boolean;
   payingAccountId: string | null; chargeDate: string | null;
 }
 export interface MonthPlan {

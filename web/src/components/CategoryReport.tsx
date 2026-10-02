@@ -12,12 +12,12 @@ const colorAt = (i: number) => (i < DONUT_SLICES ? CHART_COLORS[i % CHART_COLORS
 
 interface Group { key: string; categoryId: number | null; name: string; spend: number; fixed: number; count: number; children: Group[] }
 
-/** Household spend of a row, net of paybacks; refunds count as negative spend (same as the server's spendOf − refundOf). */
+/** Spend of a row, net of paybacks; refunds count as negative spend (same as the server's spendOf − refundOf). */
 function spendOf(t: Tx): number {
   if (t.excluded) return 0;
-  if (t.kind === 'refund' && !t.linkedInflow) return -Math.max(0, t.personalAmount);
+  if (t.kind === 'refund' && !t.linkedInflow) return -Math.max(0, t.amount);
   if (t.kind !== 'expense') return 0;
-  return Math.max(0, -t.personalAmount - t.paybackTotal * (t.personalAmount / (t.amount || 1)));
+  return Math.max(0, -t.amount - t.paybackTotal);
 }
 
 /**
@@ -138,7 +138,7 @@ export function CategoryReport({ rows, truncated, onPick }: { rows: Tx[]; trunca
         })}
       </ul>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        לפי הסינון הנוכחי בעמוד. חלק הבית בלבד (בלי חלק עסקי), אחרי החזרים וזיכויים. העברות, חסכונות ותשלומי כרטיס לא נספרים.
+        לפי הסינון הנוכחי בעמוד, אחרי החזרים וזיכויים. העברות, חסכונות ותשלומי כרטיס לא נספרים.
         {truncated && ' מוצגות רק 1,000 התנועות האחרונות — בחרו חודש כדי לראות את כל התמונה.'}
       </p>
     </div>

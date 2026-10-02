@@ -17,7 +17,7 @@ const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
 db.pragma('query_only = ON');
 
 // GET endpoints the agent may read (all are read-only)
-const API_PATHS = /^\/(summary|income|cashflow|forecast|cards\/upcoming|month-plan|installments|recurring|budgets|planning|alerts|recommendations|networth|transactions|planned|categories|meta|events(\/\d+)?|businesses\/\d+\/report|members|accounts|businesses|tags|funds|assets|liabilities|scheduled|sync-status|insurance|pension|investments)$/;
+const API_PATHS = /^\/(summary|income|cashflow|forecast|cards\/upcoming|month-plan|installments|recurring|budgets|planning|alerts|recommendations|networth|transactions|planned|categories|meta|events(\/\d+)?|members|accounts|tags|funds|assets|scheduled|sync-status|insurance|pension|investments)$/;
 
 const TOOLS = [
   {
@@ -29,7 +29,7 @@ Paths: /summary, /month-plan?cycle=YYYY-MM, /cashflow?cycles=N (per-month income
 /insurance (policies, their documents with a path to open with Read, actual payments, insurance charges with no policy),
 /pension (pension / study / provident funds: value, fees, tracks + returns, deposits, expected pension; the latest report's totals),
 /investments (stock-market holdings: live price, value in ILS, gain vs buy price / baseline, today's change, value history).
-Common filters on most: member=ID, business=ID, tags=ID,ID.`,
+Common filters on most: member=ID, tags=ID,ID.`,
     inputSchema: {
       type: 'object',
       properties: { path: { type: 'string', description: 'e.g. /cashflow?cycles=6' } },

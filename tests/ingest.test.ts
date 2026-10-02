@@ -128,15 +128,14 @@ describe('kinds, card bills and transfers', () => {
     const db = testDb();
     addAccount(db, 'max:1', 'card');
     const cat = Number(db.prepare(`INSERT INTO categories (name) VALUES ('פרסום')`).run().lastInsertRowid);
-    const biz = Number(db.prepare(`INSERT INTO businesses (name) VALUES ('Acme')`).run().lastInsertRowid);
-    db.prepare(`INSERT INTO category_rules (match_type, pattern, set_category_id, set_business_id) VALUES ('contains', 'facebk', ?, ?)`).run(cat, biz);
+    db.prepare(`INSERT INTO category_rules (match_type, pattern, set_category_id, set_member_id) VALUES ('contains', 'facebk', ?, 2)`).run(cat);
     const a = addTx(db, { account: 'max:1', date: '2026-09-01', description: 'FACEBK A1B2C3D4E5', amount: -79 });
     const b = addTx(db, { account: 'max:1', date: '2026-09-02', description: 'FACEBK F6G7H8J9K0', amount: -79 });
     db.prepare(`UPDATE transactions SET category_id = NULL, category_source = 'manual' WHERE id = ?`).run(b);
     applyRules(db, 'all');
-    const row = (id: number) => db.prepare(`SELECT category_id, business_id FROM transactions WHERE id = ?`).get(id);
-    expect(row(a)).toEqual({ category_id: cat, business_id: biz });
-    expect(row(b)).toEqual({ category_id: null, business_id: biz });
+    const row = (id: number) => db.prepare(`SELECT category_id, member_id FROM transactions WHERE id = ?`).get(id);
+    expect(row(a)).toEqual({ category_id: cat, member_id: 2 });
+    expect(row(b)).toEqual({ category_id: null, member_id: 2 });
   });
 });
 

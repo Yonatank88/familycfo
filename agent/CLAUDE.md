@@ -58,7 +58,7 @@ Which endpoint for what:
 | Pension, managers' insurance, study funds (השתלמות), provident funds (גמל): value, fees, tracks, deposits, expected pension | `/pension` |
 | Stock-market holdings: live price, value in ₪, gain vs. buy price / baseline, today's change, value history | `/investments` |
 
-Most endpoints also take `member=ID` (a household member) and `business=ID`.
+Most endpoints also take `member=ID` (a household member).
 
 ## Pension and long-term savings
 
@@ -88,7 +88,6 @@ Most endpoints also take `member=ID` (a household member) and `business=ID`.
   - `transfer` (between own accounts), `card_payment` (the bank row paying a card bill) and `savings` are **never** income or spend.
   - A card's purchases are the spend; never count the card bill on the bank as well.
 - Installments (`txn_type = 'installments'`) count on their charge date `processed_date`; other spend on the purchase date `date`.
-- Business share: when `business_id` is set, the household share is `charged_amount × (100 − business_share_pct) / 100`.
 - `excluded = 1` rows don't count anywhere.
 - Member of a row = `transactions.member_id`, else the account's `owner_member_id`, else shared.
 - Categories have `parent_id` (parent → leaf). The app's per-category numbers roll leaves up into the parent.
@@ -99,7 +98,7 @@ Most endpoints also take `member=ID` (a household member) and `business=ID`.
 Household spend of a month in SQL (calendar-month cycles):
 
 ```sql
-SELECT c.name, ROUND(SUM(-t.charged_amount * (100 - CASE WHEN t.business_id IS NULL THEN 0 ELSE t.business_share_pct END) / 100.0)) AS spend
+SELECT c.name, ROUND(SUM(-t.charged_amount)) AS spend
 FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
 WHERE t.kind IN ('expense', 'refund') AND t.excluded = 0
   AND substr(CASE WHEN t.txn_type = 'installments' THEN t.processed_date ELSE t.date END, 1, 7) = '2026-09'

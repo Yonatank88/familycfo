@@ -3,7 +3,7 @@ import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import {
-  ArrowLeftRight, ChartColumn, Bell, Briefcase, CalendarCheck, Home, Layers, LayoutDashboard, Lightbulb, Menu, PieChart,
+  ArrowLeftRight, ChartColumn, Bell, CalendarCheck, Layers, LayoutDashboard, Lightbulb, Menu, PieChart,
   ChartCandlestick, Settings2, ShieldCheck, Tags, TrendingUp, Umbrella, Wallet, X, type LucideIcon,
 } from 'lucide-react';
 import { api, type Alert } from './api';
@@ -12,9 +12,7 @@ import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Budgets from './pages/Budgets';
 import Cashflow from './pages/Cashflow';
-import Businesses from './pages/Businesses';
 import Savings from './pages/Savings';
-import Loans from './pages/Loans';
 import Insights from './pages/Insights';
 import Settings from './pages/Settings';
 import Events from './pages/Events';
@@ -39,11 +37,9 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/cashflow', label: 'תזרים ותחזית', icon: TrendingUp },
   { to: '/insights', label: 'תובנות והתראות', icon: Lightbulb },
   { to: '/events', label: 'אירועים ותגיות', icon: Tags },
-  { to: '/businesses', label: 'עסקים', icon: Briefcase },
   { to: '/savings', label: 'חסכונות והון', icon: Wallet },
   { to: '/investments', label: 'השקעות', icon: ChartCandlestick },
   { to: '/pension', label: 'פנסיה וגמל', icon: Umbrella },
-  { to: '/loans', label: 'הלוואות ומשכנתא', icon: Home },
   { to: '/insurance', label: 'ביטוחים', icon: ShieldCheck },
   { to: '/categories', label: 'קטגוריות', icon: Layers },
   { to: '/settings', label: 'הגדרות', icon: Settings2 },
@@ -69,12 +65,6 @@ function FilterBar() {
           { value: undefined as number | undefined, label: 'כל הבית' },
           ...meta.members.map(m => ({ value: m.id as number | undefined, label: <><MemberAvatar name={m.name} color={m.color} size={18} />{m.name}</> })),
         ]} />
-      {meta.businesses.length > 0 && (
-        <Picker className="input w-auto min-w-36 max-md:min-w-0 max-md:flex-1" aria-label="עסק"
-          value={filters.businessId != null ? String(filters.businessId) : ''}
-          onChange={v => setFilters({ ...filters, businessId: v ? Number(v) : undefined })}
-          options={[{ value: '', label: 'כל העסקים', icon: <Briefcase /> }, ...meta.businesses.map(b => ({ value: String(b.id), label: b.name, icon: <Briefcase style={{ color: b.color ?? undefined }} /> }))]} />
-      )}
       {meta.tags.length > 0 && (
         <Picker className="input w-auto min-w-32 max-md:min-w-0 max-md:flex-1" aria-label="תגית" value="" placeholder="+ תגית" searchPlaceholder="חיפוש תגית…"
           onChange={v => v && setFilters({ ...filters, tagIds: [...new Set([...filters.tagIds, Number(v)])] })}
@@ -259,9 +249,7 @@ export default function App() {
               <Route path="/cashflow" element={<Cashflow />} />
               <Route path="/insights" element={<Insights />} />
               <Route path="/events" element={<Events />} />
-              <Route path="/businesses" element={<Businesses />} />
               <Route path="/savings" element={<Savings />} />
-              <Route path="/loans" element={<Loans />} />
               <Route path="/categories" element={<Categories />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>

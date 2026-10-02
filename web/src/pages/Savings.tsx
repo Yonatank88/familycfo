@@ -5,7 +5,7 @@ import { api, type Asset, type Fund, type NetWorth } from '../api';
 import { useLookups } from '../state';
 import { ASSET_TYPE_LABELS, day, moneyIn, todayIso } from '../format';
 import {
-  Banknote, Bitcoin, Building, ChartCandlestick, CreditCard, DollarSign, Euro, GraduationCap, HandCoins, Home, Landmark, LineChart, Lock,
+  Banknote, Bitcoin, Building, ChartCandlestick, CreditCard, DollarSign, Euro, GraduationCap, Landmark, LineChart, Lock,
   type LucideIcon, Package, Pencil, PiggyBank, PoundSterling, Scale, SwissFranc, Target, TrendingUp, Umbrella, Vault, Wallet,
 } from 'lucide-react';
 import { Empty, ErrorBox, Field, Loading, MemberBadge, MemberSelect, Modal, Money, PageHeader, Picker, Progress, SectionTitle, Stat } from '../components/ui';
@@ -16,7 +16,7 @@ const CURRENCIES = ['ILS', 'USD', 'EUR', 'GBP', 'CHF'];
 const TYPE_ICONS: Record<string, LucideIcon> = {
   bank_savings: PiggyBank, deposit: Lock, pension: Umbrella, keren_hishtalmut: GraduationCap, kupat_gemel: Vault,
   brokerage: ChartCandlestick, crypto: Bitcoin, real_estate: Building, other: Package,
-  bank: Landmark, card: CreditCard, loan: HandCoins, mortgage: Home,
+  bank: Landmark, card: CreditCard,
 };
 const typeIcon = (t: string) => TYPE_ICONS[t] ?? Wallet;
 const CURRENCY_ICONS: Record<string, LucideIcon> = { ILS: Banknote, USD: DollarSign, EUR: Euro, GBP: PoundSterling, CHF: SwissFranc };

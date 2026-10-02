@@ -4,7 +4,7 @@ import { ArrowDownLeft, ArrowUpRight, CreditCard, Landmark, Trash2, Wallet } fro
 import { api, type PlannedItem, type Tx } from '../api';
 import { useLookups } from '../state';
 import { todayIso } from '../format';
-import { BusinessSelect, CategorySelect, Field, Modal, Picker, Segmented, TagPicker } from './ui';
+import { CategorySelect, Field, Modal, Picker, Segmented, TagPicker } from './ui';
 import { MemberAvatar } from '@/lib/visuals';
 
 const PAID = 'paid';
@@ -32,8 +32,6 @@ export function ManualEntry({ tx, planned, defaultMemberId, defaultPlanned, onCl
     description: planned?.description ?? tx?.description ?? '',
     categoryId: planned?.categoryId ?? tx?.categoryId ?? null,
     memberId: planned?.memberId ?? tx?.memberId ?? defaultMemberId ?? null,
-    businessId: tx?.businessId ?? null,
-    businessSharePct: tx?.businessId ? Math.round((tx.businessAmount / (tx.amount || 1)) * 100) : 100,
     tagIds: planned?.tagIds ?? tx?.tagIds ?? [],
     notes: planned?.notes ?? tx?.notes ?? '',
     installments: planned?.installments ?? 1,
@@ -95,17 +93,10 @@ export function ManualEntry({ tx, planned, defaultMemberId, defaultPlanned, onCl
         <Field label="שייך ל"><Picker className="input" value={form.memberId != null ? String(form.memberId) : ''} options={memberOptions} searchable={false}
           onChange={v => set({ memberId: v ? Number(v) : null })} /></Field>
       </div>
-      {isPlanned ? (
+      {isPlanned && (
         <Field label="איך זה יופיע בדף הכרטיס (לא חובה)">
           <input className="input" value={form.matchPattern} onChange={e => set({ matchPattern: e.target.value })} placeholder="למשל: IKEA — עוזר לזהות את החיוב" />
         </Field>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="עסק"><BusinessSelect value={form.businessId} onChange={businessId => set({ businessId })} /></Field>
-          <Field label="חלק עסקי (%)">
-            <input className="input" type="number" min={0} max={100} disabled={!form.businessId} value={form.businessSharePct} onChange={e => set({ businessSharePct: Number(e.target.value) })} />
-          </Field>
-        </div>
       )}
       <Field label="תגיות"><TagPicker value={form.tagIds} onChange={tagIds => set({ tagIds })} /></Field>
       <Field label="הערות"><textarea className="input" rows={2} value={form.notes} onChange={e => set({ notes: e.target.value })} placeholder={isPlanned ? '' : 'למשל: שולם במזומן'} /></Field>

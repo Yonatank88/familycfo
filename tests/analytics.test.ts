@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { cycleFor, loadTransactions, merchantKey, spendOf } from '../src/analytics/common.js';
 import { installmentPlans, upcomingCardCharges } from '../src/analytics/cards.js';
 import { projectForecast, type ForecastInput } from '../src/analytics/forecast.js';
-import { supersedeByLiabilities, type ScheduledItem } from '../src/analytics/scheduled.js';
+import type { ScheduledItem } from '../src/analytics/scheduled.js';
 import { findDuplicateCharges, findAnomalies } from '../src/analytics/alerts.js';
 import { findPaybackCandidates } from '../src/analytics/paybacks.js';
 import { detectRecurring } from '../src/analytics/recurring.js';
@@ -14,7 +14,7 @@ import { addAccount, addTx, testDb } from './helpers.js';
 const item = (over: Partial<ScheduledItem>): ScheduledItem => ({
   id: 1, name: 'x', kind: 'fixed_expense', amount: 0, amount_mode: 'fixed', day_of_month: 1,
   bank_account_id: 'bank:1', member_id: 1, category_id: null, match_pattern: null, card_account_id: null,
-  liability_id: null, start_date: null, end_date: null, status: 'confirmed', ...over,
+  start_date: null, end_date: null, status: 'confirmed', ...over,
 });
 
 describe('cycles', () => {
@@ -75,34 +75,6 @@ describe('day-by-day forecast', () => {
     const cardEvents = f.events.filter(e => e.kind === 'card_charge');
     expect(cardEvents).toHaveLength(1);
     expect(cardEvents[0].amount).toBe(-2500);
-  });
-});
-
-describe('user-entered loans replace detected repayments', () => {
-  it('dismisses the detected mortgage and car loan covered by the loans the user added', () => {
-    const db = testDb();
-    addAccount(db, 'leumi:1', 'bank');
-    const ins = db.prepare(`INSERT INTO scheduled_items (name, kind, amount, day_of_month, bank_account_id, match_pattern, liability_id, status)
-      VALUES (?, ?, ?, 15, 'leumi:1', ?, ?, 'confirmed')`);
-    const loan = (name: string) => Number(db.prepare(`INSERT INTO liabilities (name, type) VALUES (?, 'mortgage')`).run(name).lastInsertRowid);
-    // detected from bank history
-    const detectedMortgage = Number(ins.run('לאומי למשכנת-י', 'mortgage', -6747.30, 'לאומי למשכנת', null).lastInsertRowid);
-    const detectedLoan = Number(ins.run('פרעון הלוואה', 'loan', -1250.50, 'פרעון הלוואה', null).lastInsertRowid);
-    const otherLoan = Number(ins.run('הלוואה אחרת', 'loan', -500, 'הלוואה אחרת', null).lastInsertRowid);
-    // entered on the Loans page: three mortgage tracks and the car loan
-    // the first track has a description that never appears on the statement, the others have none
-    const tracks = [-2300, -1880, -2006].map((a, i) => Number(ins.run(`מסלול ${i}`, 'mortgage', a, i === 0 ? 'משכנתא' : null, loan(`m${i}`)).lastInsertRowid));
-    ins.run('הלוואת רכב', 'loan', -1250, null, loan('car'));
-    const recently = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
-    addTx(db, { account: 'leumi:1', date: recently, description: 'לאומי למשכנת-י', amount: -6186.35, kind: 'expense' });
-
-    expect(supersedeByLiabilities(db)).toBe(2);
-    const status = (id: number) => db.prepare(`SELECT status FROM scheduled_items WHERE id = ?`).pluck().get(id);
-    expect([status(detectedMortgage), status(detectedLoan), status(otherLoan)]).toEqual(['dismissed', 'dismissed', 'confirmed']);
-    // the tracks take the bank description so an already-posted payment isn't counted again
-    expect(tracks.map(t => db.prepare(`SELECT match_pattern FROM scheduled_items WHERE id = ?`).pluck().get(t))).toEqual(Array(3).fill('לאומי למשכנת'));
-    // already dismissed: nothing more to do
-    expect(supersedeByLiabilities(db)).toBe(0);
   });
 });
 
@@ -240,7 +212,7 @@ describe('paybacks', () => {
   });
 });
 
-describe('recurring and business share', () => {
+describe('recurring', () => {
   it('detects a monthly subscription', () => {
     const db = testDb();
     addAccount(db, 'isracard:1', 'card');
@@ -248,17 +220,6 @@ describe('recurring and business share', () => {
     const series = detectRecurring(loadTransactions(db), '2026-09-20');
     expect(series).toHaveLength(1);
     expect(series[0]).toMatchObject({ kind: 'subscription', typicalAmount: 64.9, typicalDay: 3 });
-  });
-
-  it('keeps the business share out of household spend', () => {
-    const db = testDb();
-    addAccount(db, 'max:1', 'card');
-    const biz = Number(db.prepare(`INSERT INTO businesses (name) VALUES ('b')`).run().lastInsertRowid);
-    const id = addTx(db, { account: 'max:1', date: '2026-09-10', description: 'פרטנר', amount: -200, kind: 'expense' });
-    db.prepare(`UPDATE transactions SET business_id = ?, business_share_pct = 25 WHERE id = ?`).run(biz, id);
-    const s = summarizeCycle(loadTransactions(db), { key: '2026-09', start: '2026-09-01', end: '2026-09-30' });
-    expect(s.spend).toBe(150);
-    expect(s.byBusiness[biz].spend).toBe(50);
   });
 });
 

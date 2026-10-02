@@ -30,7 +30,7 @@ export const SCHEDULED_KIND_LABELS: Record<string, string> = {
 export const ASSET_TYPE_LABELS: Record<string, string> = {
   bank_savings: 'חיסכון בבנק', deposit: 'פיקדון', pension: 'פנסיה', keren_hishtalmut: 'קרן השתלמות', kupat_gemel: 'קופת גמל',
   brokerage: 'תיק השקעות', crypto: 'קריפטו', real_estate: 'נדל"ן', other: 'אחר',
-  bank: 'עו"ש', card: 'חיובי כרטיס פתוחים', loan: 'הלוואה', mortgage: 'משכנתא',
+  bank: 'עו"ש', card: 'חיובי כרטיס פתוחים',
 };
 
 export const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());

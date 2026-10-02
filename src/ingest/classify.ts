@@ -20,8 +20,6 @@ export interface Rule {
   min_amount: number | null;
   max_amount: number | null;
   set_category_id: number | null;
-  set_business_id: number | null;
-  set_business_share_pct: number | null;
   set_member_id: number | null;
   set_kind: string | null;
   set_tag_ids: string | null;
@@ -65,11 +63,10 @@ export function applyRules(db: DB, txIds: number[] | 'all', rules = loadRules(db
   const rows = (txIds === 'all'
     ? db.prepare(`SELECT * FROM transactions`).all()
     : txIds.map(id => db.prepare(`SELECT * FROM transactions WHERE id = ?`).get(id)).filter(Boolean)
-  ) as (TxRow & { business_id: number | null; member_id: number | null })[];
+  ) as (TxRow & { member_id: number | null })[];
 
   const setCategory = db.prepare(`UPDATE transactions SET category_id = ?, category_source = 'rule' WHERE id = ?`);
   const setKind = db.prepare(`UPDATE transactions SET kind = ?, kind_source = 'rule' WHERE id = ?`);
-  const setBusiness = db.prepare(`UPDATE transactions SET business_id = ?, business_share_pct = ? WHERE id = ?`);
   const setMember = db.prepare(`UPDATE transactions SET member_id = ? WHERE id = ?`);
   const addTag = db.prepare(`INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?)`);
   const changed: number[] = [];
@@ -80,9 +77,6 @@ export function applyRules(db: DB, txIds: number[] | 'all', rules = loadRules(db
       if (!rule) continue;
       if (rule.set_category_id && tx.category_source !== 'manual') setCategory.run(rule.set_category_id, tx.id);
       if (rule.set_kind && tx.kind_source !== 'manual') setKind.run(rule.set_kind, tx.id);
-      if (rule.set_business_id && tx.business_id == null) {
-        setBusiness.run(rule.set_business_id, rule.set_business_share_pct ?? 100, tx.id);
-      }
       if (rule.set_member_id && tx.member_id == null) setMember.run(rule.set_member_id, tx.id);
       for (const tagId of JSON.parse(rule.set_tag_ids || '[]') as number[]) addTag.run(tx.id, tagId);
       changed.push(tx.id);
