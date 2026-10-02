@@ -21,6 +21,7 @@ a live stock portfolio, and an optional AI chat that answers questions about you
 - [Privacy and security](#privacy-and-security)
 - [Quick start — try the demo](#quick-start--try-the-demo)
 - [Setup with your own banks](#setup-with-your-own-banks)
+- [Brokers, wallets and exchanges](#brokers-wallets-and-exchanges)
 - [Everyday use](#everyday-use)
 - [The AI data chat (optional)](#the-ai-data-chat-optional)
 - [Importing pension and insurance reports](#importing-pension-and-insurance-reports)
@@ -46,7 +47,7 @@ a live stock portfolio, and an optional AI chat that answers questions about you
 | **תובנות והתראות** (Insights) | Detected subscriptions and price changes, unusual charges, savings capacity, a plan for a tight month. |
 | **אירועים ותגיות** (Events & tags) | Tag a trip, a wedding or a renovation and see what it really cost. |
 | **חסכונות והון** (Savings & net worth) | Bank savings, deposits, pension, study funds, brokerage, real estate, minus open card charges = net worth, over time. Sinking funds with goals. |
-| **השקעות** (Investments) | Stock-market holdings at **live prices** (Yahoo Finance — US, TASE, London, crypto…). Value in ₪, gain vs. the buy price (including the exchange-rate effect), today's change, allocation and value history. Holdings without a buy price start from today's price. Counts in net worth. |
+| **השקעות** (Investments) | Stock-market holdings at **live prices** (Yahoo Finance — US, TASE, London, crypto…). Value in ₪, gain vs. the buy price (including the exchange-rate effect), today's change, allocation and value history. Holdings without a buy price start from today's price. **Synced** from Interactive Brokers, ETH wallets and Binance on every scrape, or entered by hand. Counts in net worth. |
 | **פנסיה וגמל** (Pension) | Pension funds, managers' insurance, study funds (קרנות השתלמות) and provident funds (קופות גמל): balance, fees, tracks and returns, deposits per month, expected pension, which study funds are already liquid. |
 | **ביטוחים** (Insurance) | Every policy with premium, coverage, renewal date and documents (PDF / images). What each policy *actually* cost in the last 12 months (matched from card / bank charges), and insurance charges with no policy yet. |
 | **✨ data chat** | Ask in Hebrew: "כמה הוצאנו על סופר החודש?", "מה מכסה ביטוח הבריאות שלי?", "תן לי סקירה של התיק". Answers come from your own database and documents — see [below](#the-ai-data-chat-optional). |
@@ -65,10 +66,12 @@ It understands how Israeli money actually moves:
 
 - **Everything stays on your machine.** The API binds to `127.0.0.1` only and has **no login** — anyone who can reach
   the port sees everything, so never expose it to a network or the internet.
-- Your bank logins live in `accounts.json` (git-ignored). The database `bank.db`, its backups and imported documents
-  (`data/`) are git-ignored too. **Never commit them.** Prefer full-disk encryption on the computer that runs this.
+- Your bank logins and API keys live in `accounts.json` (git-ignored). The database `bank.db`, its backups, imported
+  documents and the raw scrape archive (`data/`) are git-ignored too. **Never commit them.** Prefer full-disk encryption on the computer that runs this.
 - Outgoing network calls, and what they send:
   - your banks / card companies (the scraper logs in as you, in a local Chrome);
+  - the investment sources you configure: Interactive Brokers (your Flex token), Alchemy (your wallet **addresses** only)
+    and your exchange (a read-only API key);
   - Bank of Israel exchange rates (nothing personal);
   - Yahoo Finance quotes — **only ticker symbols**, never quantities or values;
   - the data chat, if you use it: your questions and the data it reads go to Anthropic through your own Claude Code login;
@@ -112,6 +115,7 @@ accounts, two cards, a mortgage payment, savings and a small stock portfolio. De
    | מזרחי טפחות | `mizrahi` | `username`, `password` |
    | הבינלאומי / מסד / אוצר החייל / איגוד | `beinleumi` / `massad` / `otsarHahayal` / `union` | `username`, `password` |
    | יהב | `yahav` | `username`, `nationalID`, `password` |
+   | וואן זירו | `oneZero` | `email`, `password`, `phoneNumber` (`+972…`) — then `npm run link -- onezero`, see below |
    | ישראכרט / אמריקן אקספרס | `isracard` / `amex` | `id`, `card6Digits`, `password` |
    | מקס | `max` | `username`, `password` |
    | כאל | `visaCal` | `username`, `password` |
@@ -129,6 +133,16 @@ accounts, two cards, a mortgage payment, savings and a small stock portfolio. De
    A Chrome window opens for each company (`SHOW_BROWSER=0` for headless). If Bank Hapoalim asks for an SMS code,
    type it in the terminal. To fetch more history: `SCRAPE_FROM=2025-01-01 npm run scrape`.
 
+   **One Zero** texts a code on every login. Link it once instead:
+
+   ```bash
+   npm run link -- onezero
+   ```
+
+   It sends the SMS to `phoneNumber`, asks for the code, and saves the long-term token it gets back into the account's
+   `credentials.otpLongTermToken` in `accounts.json` (it's never printed). From then on One Zero scrapes unattended —
+   also on a schedule. Run it again if the token expires. Without a token, the scrape asks for the code each time.
+
 4. **Start the app:**
 
    ```bash
@@ -144,12 +158,43 @@ accounts, two cards, a mortgage payment, savings and a small stock portfolio. De
    names (e.g. "מזון וצריכה") are mapped to it, so most card rows are categorized right away. Fix the rest on the
    transactions page; "החל על תנועות דומות" saves a rule for next time.
 
+## Brokers, wallets and exchanges
+
+The `investments` list in `accounts.json` syncs positions into **השקעות** on every scrape (`npm run scrape`, or the
+button). They get live Yahoo Finance prices and count in net worth like holdings you add by hand.
+
+| `type` | Source | Settings |
+|---|---|---|
+| `ibkr` | Interactive Brokers — positions and cash of every account in a Flex Query | `token`, `queryId` |
+| `wallets` | EVM wallets (ETH and tokens, on the networks you list) via [Alchemy](https://www.alchemy.com/) — a free key is enough | `apiKey`, `wallets: [{ address, label? }]`, `networks?` (default `eth-mainnet`), `minUsd?` (default 1) |
+| `exchange` | Binance, or any exchange [ccxt](https://github.com/ccxt/ccxt) supports | `exchange` (`binance`), `apiKey`, `secret`, `password?` |
+
+Each can also take `ownerMemberId` (the household member it belongs to), `label` (the broker name shown) and `id`
+(default `ibkr` / `wallets` / the exchange id — the name `SCRAPE_ONLY` and the sync status use). See
+`accounts.example.json`.
+
+- **IBKR:** in Client Portal → Performance & Reports → Flex Queries, create an Activity Flex Query with *Open Positions*
+  (Summary) and *Cash Report*; note its id, then generate a token under *Flex Web Service*. Cash becomes one holding per
+  currency (`CASH.USD`…), so the IBKR item in net worth is the account's full value.
+- **Binance:** create an API key with **read only** permission (no trading, no withdrawals). ccxt is an optional
+  dependency; if `npm install` skipped it, run `npm install ccxt`.
+- **Wallets:** only the addresses are sent. Tokens with no price or worth less than `minUsd` (airdropped spam, dust) are
+  left out.
+
+A position that's gone from the source is archived; one that comes back is restored. Symbols are mapped to Yahoo
+(`TEVA` on TASE → `TEVA.TA`, `ETH` → `ETH-USD`); when Yahoo has no quote, or its price is far from the source's (a
+different coin with the same ticker), the source's own price is kept as a manual price. The sync owns the quantity
+and price of these holdings — edit their name, broker or owner freely. `SCRAPE_ONLY=ibkr,binance npm run scrape`
+syncs only those.
+
 ## Everyday use
 
 - **Scrape from the browser:** the refresh button at the top of the overview runs the same scrape, shows progress
   per company and asks for the OTP code in the page when the bank wants one.
 - **Or on a schedule:** `SCHEDULE="0 7 * * *" npm run scrape` keeps running and scrapes every morning at 7.
 - Re-scraping is safe: rows are de-duplicated, and anything you edited by hand (category, kind, member) is never overwritten.
+- Every scrape / sync result is also kept untouched in `data/raw/<company>/<time>.json` (git-ignored), so it can be
+  re-processed if parsing changes — and it's the only history of synced positions. Delete old files whenever you like.
 - `npm run pipeline` re-runs classification, recurring-payment detection, suggestions and alerts without scraping.
 
 ## The AI data chat (optional)
@@ -190,16 +235,18 @@ Both are idempotent — re-running updates, never duplicates. Policy documents c
 
 | Setting | Where | Default | What |
 |---|---|---|---|
-| Bank logins | `accounts.json` | — | `{ "accounts": [{ "companyId", "credentials" }], "categoryApiUrl"? }` |
+| Bank logins | `accounts.json` | — | `{ "accounts": [{ "companyId", "credentials" }], "investments"?: [...], "categoryApiUrl"? }` |
+| `investments` | `accounts.json` | none | Brokers, wallets and exchanges to sync — see [above](#brokers-wallets-and-exchanges). |
 | `categoryApiUrl` | `accounts.json` | none | Optional endpoint for categorizing rows no rule / cache / card category explains: receives `POST {"description"}`, answers `{"category": "<category name>"}`. |
 | `ACCOUNTS_FILE` | env | `accounts.json` | Path of the logins file. |
 | `BANK_DB` | env | `bank.db` | Database file. Use a copy for experiments. |
 | `PORT` / `WEB_PORT` | env | `4310` / `5180` | API and web app ports (both bind to 127.0.0.1). |
-| `SCRAPE_ONLY` | env | all | `SCRAPE_ONLY=isracard,max` scrapes only these companies. |
+| `SCRAPE_ONLY` | env | all | `SCRAPE_ONLY=isracard,max,ibkr` scrapes / syncs only these companies and investment sources. |
 | `SCRAPE_FROM` | env | 3 months back | Start date of the scrape (`YYYY-MM-DD`), for backfilling. |
 | `SHOW_BROWSER` | env | shown | `SHOW_BROWSER=0` runs Chrome headless. |
 | `SCHEDULE` | env | none | Cron expression; keeps `npm run scrape` running on a schedule. |
 | `POLICIES_DIR` / `REPORTS_DIR` | env | `data/policies` / `data/reports` | Where insurance documents and imported reports are kept. |
+| `RAW_DIR` | env | `data/raw` | Where untouched scrape / sync payloads are archived. |
 | `CATEGORY_API_URL` | env | none | `categoryApiUrl` for `npm run pipeline`. |
 | Cycle start day, minimum balance | Settings page | 1, ₪2,000 | |
 
@@ -209,9 +256,11 @@ Both are idempotent — re-running updates, never duplicates. Policy documents c
 src/
   scraper.ts            israeli-bank-scrapers runner (OTP, progress hooks)
   index.ts              `npm run scrape` entry (once or on a cron schedule)
+  link.ts               `npm run link -- onezero`: one-time 2FA → long-term token
   pipeline.ts           what runs after every scrape: FX → categorize → kinds → card bills → transfers → recurring → alerts
   db/                   SQLite connection, numbered migrations, saving scraped accounts
-  ingest/               normalize & de-duplicate rows, classification rules, card-bill / transfer reconciliation
+  ingest/               raw archive, normalize & de-duplicate rows, classification rules, card-bill / transfer reconciliation
+  sync/                 IBKR, wallets (Alchemy) and exchanges (ccxt) → holdings
   analytics/            pure functions: cash flow, budgets, forecast, recurring, net worth, investments, alerts …
   server/               Fastify API (127.0.0.1) + the data chat runner
   agent/                read-only MCP server and the document-read guard for the chat
@@ -244,7 +293,10 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **A login fails / times out:** run with the browser shown (the default) to see where it stops; banks change their
   sites, so update `israeli-bank-scrapers` (`npm update israeli-bank-scrapers`). Some banks block headless logins.
-- **The OTP prompt never appears:** OTP entry is wired for Bank Hapoalim. Other banks that ask for a code may need
+- **One Zero fails with an invalid token:** the long-term token expired — `npm run link -- onezero` again.
+- **An investment source fails:** its holdings stay as they were; the reason is in Settings → מצב סריקות and the
+  terminal. IBKR tokens expire (renew under Flex Web Service); a Flex Query must include Open Positions.
+- **The OTP prompt never appears:** OTP entry is wired for Bank Hapoalim (and One Zero without a token). Other banks that ask for a code may need
   `SHOW_BROWSER=1` and typing it in the Chrome window.
 - **A card bill shows as an expense:** that card isn't scraped (or isn't linked). Add the card company to
   `accounts.json`, or set "משולם מ-" for the card in Settings.

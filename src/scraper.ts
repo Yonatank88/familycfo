@@ -2,6 +2,7 @@ import { createScraper, CompanyTypes } from 'israeli-bank-scrapers';
 import { getDb, type DB } from './db/connection.js';
 import { saveScrapedAccount, recordScrapeRun } from './db/ingestRepo.js';
 import { archiveRaw } from './ingest/archive.js';
+import type { InvestmentSource } from './sync/index.js';
 import * as readline from 'readline';
 import type { Page } from 'puppeteer';
 import { existsSync } from 'fs';
@@ -40,6 +41,8 @@ interface AccountConfig {
 
 export interface Config {
   accounts: AccountConfig[];
+  /** brokers, wallets and exchanges synced into holdings (src/sync/) */
+  investments?: InvestmentSource[];
   /** optional external categorizer: POST {description} → {category} */
   categoryApiUrl?: string;
 }

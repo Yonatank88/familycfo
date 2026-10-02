@@ -1,6 +1,7 @@
 import type { DB } from '../db/connection.js';
-import { scrapeAll } from '../scraper.js';
+import { scrapeAll, type ScrapeProgress } from '../scraper.js';
 import { runPipeline } from '../pipeline.js';
+import { investmentSourceId, syncInvestments } from '../sync/index.js';
 // reads the bank credentials file; the credentials go only to the scraper and are never returned by the API
 import { loadConfig } from '../config.js';
 
@@ -54,8 +55,20 @@ export function startScrape(db: DB): ScrapeJobState {
   const only = process.env.SCRAPE_ONLY?.split(',').map(s => s.trim()).filter(Boolean);
   state = {
     ...idle(), status: 'running', startedAt: new Date().toISOString(),
-    companies: config.accounts.filter(a => !only || only.includes(a.companyId))
-      .map(a => ({ company: a.companyId, status: 'pending', newTransactions: 0, error: null })),
+    companies: [...(config.accounts ?? []).map(a => a.companyId), ...(config.investments ?? []).map(investmentSourceId)]
+      .filter(company => !only || only.includes(company))
+      .map(company => ({ company, status: 'pending', newTransactions: 0, error: null })),
+  };
+
+  const onProgress = (event: ScrapeProgress) => {
+    if (event.type === 'start') setCompany(event.company, { status: 'running' });
+    else {
+      // a bank that ended (e.g. timed out) no longer needs its code
+      if (state.otp?.company === event.company) clearOtp();
+      setCompany(event.company, event.success
+        ? { status: 'done', newTransactions: event.newTransactions }
+        : { status: 'failed', error: event.errorMessage || event.errorType || 'error' });
+    }
   };
 
   (async () => {
@@ -64,17 +77,10 @@ export function startScrape(db: DB): ScrapeJobState {
         answerOtp = resolve;
         state.otp = { company, requestedAt: new Date().toISOString() };
       }),
-      onProgress: event => {
-        if (event.type === 'start') setCompany(event.company, { status: 'running' });
-        else {
-          // a bank that ended (e.g. timed out) no longer needs its code
-          if (state.otp?.company === event.company) clearOtp();
-          setCompany(event.company, event.success
-            ? { status: 'done', newTransactions: event.newTransactions }
-            : { status: 'failed', error: event.errorMessage || event.errorType || 'error' });
-        }
-      },
+      onProgress,
     });
+    // brokers, wallets and exchanges → holdings (before the pipeline refreshes their quotes)
+    results.push(...await syncInvestments(config.investments, db, { onProgress }));
     state.status = 'pipeline';
     const newIds = results.flatMap(r => r.newTransactionIds);
     state.newTransactions = newIds.length;

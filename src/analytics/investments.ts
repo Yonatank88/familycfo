@@ -16,6 +16,8 @@ export interface HoldingValue {
   broker: string | null;
   ownerMemberId: number | null;
   notes: string | null;
+  /** synced from a broker / wallet / exchange (src/sync/): when — the sync owns its quantity and price */
+  syncedAt: string | null;
   exchange: string | null;
   instrumentType: string | null;
   buyPrice: number | null;
@@ -101,7 +103,7 @@ export function valueHolding(db: DB, h: Row, asOf = today()): HoldingValue {
 
   return {
     id: h.id, symbol: h.symbol, name: h.name || h.quote_name || h.symbol, quantity: h.quantity, currency,
-    broker: h.broker ?? null, ownerMemberId: h.owner_member_id ?? null, notes: h.notes ?? null,
+    broker: h.broker ?? null, ownerMemberId: h.owner_member_id ?? null, notes: h.notes ?? null, syncedAt: h.source ? h.synced_at ?? null : null,
     exchange: h.exchange ?? null, instrumentType: manual ? null : h.instrument_type ?? null,
     buyPrice: h.buy_price ?? null, buyDate: h.buy_date ?? null, baselinePrice: h.baseline_price ?? null, baselineDate: h.baseline_date ?? null,
     manualPrice: h.manual_price ?? null, manualPriceDate: h.manual_price_date ?? null,

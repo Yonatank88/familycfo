@@ -9,6 +9,7 @@ const COMPANY_LABELS: Record<string, string> = {
   hapoalim: 'בנק הפועלים', leumi: 'בנק לאומי', discount: 'דיסקונט', mizrahi: 'מזרחי טפחות', beinleumi: 'הבינלאומי',
   mercantile: 'מרכנתיל', otsarHahayal: 'אוצר החייל', yahav: 'יהב', massad: 'מסד', union: 'איגוד', oneZero: 'One Zero',
   isracard: 'ישראכרט', amex: 'אמריקן אקספרס', max: 'מקס', visaCal: 'כאל', behatsdaa: 'בהצדעה', beyahadBishvilha: 'ביחד בשבילך',
+  ibkr: 'Interactive Brokers', wallets: 'ארנקי קריפטו', binance: 'Binance',
 };
 const companyName = (id: string) => COMPANY_LABELS[id] ?? id;
 

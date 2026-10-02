@@ -122,6 +122,7 @@ export default function Investments() {
                   <td className="num text-end text-sm">{totals.valueIls ? `${Math.round((h.valueIls / totals.valueIls) * 100)}%` : '—'}</td>
                   <td className="whitespace-nowrap text-sm">
                     <div className="flex items-center gap-1.5">{h.broker ?? ''}<MemberBadge id={h.ownerMemberId} /></div>
+                    {h.syncedAt && <div className="text-xs text-zinc-500" title="הכמות והמחיר מתעדכנים מהחשבון בכל סריקה">מסונכרן · {day(h.syncedAt.slice(0, 10))}</div>}
                   </td>
                   <td><button className="btn-ghost btn-icon" aria-label="עריכה" onClick={() => setEditing({ ...h, manual: h.priceSource === 'manual' })}><Pencil /></button></td>
                 </tr>

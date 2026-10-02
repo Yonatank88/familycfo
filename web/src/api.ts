@@ -253,7 +253,7 @@ export interface PlannedItem {
 
 export interface Holding {
   id: number; symbol: string; name: string; quantity: number; currency: string; broker: string | null; ownerMemberId: number | null;
-  notes: string | null; exchange: string | null; instrumentType: string | null;
+  notes: string | null; syncedAt: string | null; exchange: string | null; instrumentType: string | null;
   buyPrice: number | null; buyDate: string | null; baselinePrice: number | null; baselineDate: string | null;
   manualPrice: number | null; manualPriceDate: string | null;
   price: number | null; priceSource: 'quote' | 'manual' | 'none'; priceAsOf: string | null; previousClose: number | null; quoteError: string | null;

@@ -5,6 +5,10 @@
       "credentials": { "userCode": "YOUR_USER_CODE", "password": "YOUR_PASSWORD" }
     },
     {
+      "companyId": "oneZero",
+      "credentials": { "email": "YOUR_EMAIL", "password": "YOUR_PASSWORD", "phoneNumber": "+972501234567" }
+    },
+    {
       "companyId": "isracard",
       "credentials": { "id": "YOUR_ID_NUMBER", "card6Digits": "123456", "password": "YOUR_PASSWORD" }
     },
@@ -15,6 +19,28 @@
     {
       "companyId": "visaCal",
       "credentials": { "username": "YOUR_USERNAME", "password": "YOUR_PASSWORD" }
+    }
+  ],
+  "investments": [
+    {
+      "type": "ibkr",
+      "token": "YOUR_FLEX_WEB_SERVICE_TOKEN",
+      "queryId": "YOUR_FLEX_QUERY_ID",
+      "ownerMemberId": 1
+    },
+    {
+      "type": "wallets",
+      "apiKey": "YOUR_ALCHEMY_API_KEY",
+      "networks": ["eth-mainnet", "arb-mainnet", "base-mainnet"],
+      "wallets": [{ "address": "0x0000000000000000000000000000000000000000", "label": "הארנק הראשי", "ownerMemberId": 1 }],
+      "minUsd": 1
+    },
+    {
+      "type": "exchange",
+      "exchange": "binance",
+      "apiKey": "YOUR_READ_ONLY_API_KEY",
+      "secret": "YOUR_READ_ONLY_API_SECRET",
+      "ownerMemberId": 1
     }
   ]
 }

@@ -633,6 +633,16 @@ export const migrations: Migration[] = [
       for (const [from, to] of Object.entries(SCRAPER_CATEGORY_ALIASES)) alias.run(from, to);
     },
   },
+  {
+    version: 15,
+    name: 'holdings synced from a broker, wallet or exchange',
+    up(db) {
+      // `${source id}:${account}` — e.g. ibkr:U1234567, wallets:0xabc…, binance:spot (src/sync/); NULL = entered by hand
+      db.exec(`ALTER TABLE holdings ADD COLUMN source TEXT`);
+      db.exec(`ALTER TABLE holdings ADD COLUMN synced_at TEXT`);
+      db.exec(`CREATE UNIQUE INDEX idx_holdings_source_symbol ON holdings(source, symbol) WHERE source IS NOT NULL`);
+    },
+  },
 ];
 
 type CategoryKind = 'expense' | 'income' | 'transfer' | 'card_payment' | 'savings';
