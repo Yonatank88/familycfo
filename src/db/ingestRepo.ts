@@ -10,14 +10,16 @@ export interface SaveResult {
 /**
  * Store one scraped account: upsert the account, record its balance and insert/update
  * its transactions. Derived fields (category, kind) are never overwritten here — only data that comes from the bank.
+ * `source`: the accounts.json entry that scraped it (its source id; default the company) — what it's grouped under.
  */
-export function saveScrapedAccount(db: DB, companyId: string, account: ScrapedAccount): SaveResult & { accountId: string } {
+export function saveScrapedAccount(db: DB, companyId: string, account: ScrapedAccount, source = companyId): SaveResult & { accountId: string } {
   const accountId = `${companyId}:${account.accountNumber}`;
 
   db.prepare(`
-    INSERT INTO accounts (id, company, kind, display_name, card_frame, currency, is_savings, last_scraped_at)
-    VALUES (@id, @company, @kind, @displayName, @cardFrame, @currency, @isSavings, CURRENT_TIMESTAMP)
+    INSERT INTO accounts (id, company, source, kind, display_name, card_frame, currency, is_savings, last_scraped_at)
+    VALUES (@id, @company, @source, @kind, @displayName, @cardFrame, @currency, @isSavings, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
+      source = excluded.source,
       card_frame = COALESCE(excluded.card_frame, accounts.card_frame),
       currency = excluded.currency,
       is_savings = MAX(accounts.is_savings, excluded.is_savings),
@@ -26,6 +28,7 @@ export function saveScrapedAccount(db: DB, companyId: string, account: ScrapedAc
   `).run({
     id: accountId,
     company: companyId,
+    source: source === companyId ? null : source,
     kind: BANK_COMPANIES.has(companyId) ? 'bank' : 'card',
     displayName: friendlyAccountName(accountId),
     cardFrame: account.cardFrame ?? null,
@@ -122,6 +125,8 @@ export function saveTransactions(db: DB, txns: NormalizedTransaction[]): SaveRes
 /** One bank / investment source's outcome in a run. `asOf` = the source's own data time. */
 /** source_runs.error prefix of a run that stopped because the bank asked for an SMS code no one could answer */
 export const NEEDS_CODE = 'NEEDS_CODE';
+/** a run's outcome (never stored) for an entry skipped because a credential is empty and it never succeeded */
+export const NOT_CONFIGURED = 'NOT_CONFIGURED';
 /** source_runs.error prefix of an unattended run that skipped a card company because its last login was refused */
 export const NEEDS_ATTENTION = 'NEEDS_ATTENTION';
 

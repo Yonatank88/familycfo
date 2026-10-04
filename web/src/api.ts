@@ -94,8 +94,9 @@ export interface FlowRow { id: number; date: string; description: string; accoun
 export interface CashFlowRows { month: string; in: FlowRow[]; out: FlowRow[]; moved: FlowRow[] }
 export interface ScrapeState {
   status: 'idle' | 'running' | 'pipeline' | 'done' | 'failed';
-  companies: { company: string; status: string; error: string | null }[];
-  otp: { company: string; requestedAt: string } | null;
+  /** company = the source id; label its name ("Cal · Hagar") */
+  companies: { company: string; label: string; status: string; error: string | null }[];
+  otp: { company: string; label: string; requestedAt: string } | null;
   error: string | null;
   test: { key: string; saved: boolean | null } | null;
 }
@@ -140,6 +141,8 @@ export interface ReportDetail extends Omit<ReportItem, 'products' | 'questions'>
 export type IntegrationStatus = 'ok' | 'failed' | 'needs_code' | 'needs_attention' | 'stale' | 'not_configured' | 'disabled';
 export interface Integration {
   id: string; key: string; label: string; kind: 'bank' | 'card' | 'investment'; status: IntegrationStatus;
+  /** the company of a bank / card entry (its id may be a second login's, e.g. visaCal-hagar); else the id */
+  companyId: string;
   /** first name */
   owner: string | null;
   lastSuccessAt: string | null; lastAttemptAt: string | null; lastError: string | null;

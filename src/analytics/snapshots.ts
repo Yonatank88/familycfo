@@ -31,7 +31,7 @@ function bankRows(db: DB, company: string, date: string, flagged: string[]): Row
   const accounts = db.prepare(`
     SELECT a.id, a.kind, COALESCE(a.currency, 'ILS') AS currency, b.balance, b.timestamp
     FROM accounts a LEFT JOIN balances b ON b.id = (SELECT MAX(id) FROM balances WHERE account_id = a.id)
-    WHERE a.company = ? AND a.active = 1
+    WHERE COALESCE(a.source, a.company) = ? AND a.active = 1
   `).all(company) as { id: string; kind: string; currency: string; balance: number | null; timestamp: string | null }[];
   const rows: Row[] = [];
 
@@ -152,7 +152,7 @@ export function accountDailyBalances(db: DB, accountId: string, until: string): 
  * them, reconstructed from the latest balance (only fills days that have no snapshot).
  */
 export function backfillBankHistory(db: DB, company: string, date: string, flagged: string[] = []): number {
-  const accounts = db.prepare(`SELECT id, COALESCE(currency, 'ILS') AS currency FROM accounts WHERE company = ? AND kind = 'bank' AND active = 1`)
+  const accounts = db.prepare(`SELECT id, COALESCE(currency, 'ILS') AS currency FROM accounts WHERE COALESCE(source, company) = ? AND kind = 'bank' AND active = 1`)
     .all(company) as { id: string; currency: string }[];
   const until = addDays(date, -1);
   const totals = new Map<string, { value: number; exact: boolean }>();
@@ -182,7 +182,7 @@ const fillAccountDay = (db: DB) => db.prepare(`INSERT OR IGNORE INTO account_bal
   VALUES (?, ?, ?, ?, ?, ?)`);
 
 const bankAccountsOf = (db: DB, company: string) =>
-  db.prepare(`SELECT id, COALESCE(currency, 'ILS') AS currency FROM accounts WHERE company = ? AND kind = 'bank' AND active = 1`)
+  db.prepare(`SELECT id, COALESCE(currency, 'ILS') AS currency FROM accounts WHERE COALESCE(source, company) = ? AND kind = 'bank' AND active = 1`)
     .all(company) as { id: string; currency: string }[];
 
 /** Today's row per bank account of a company that succeeded in this run: its latest balance, valued at today's rate. */
@@ -235,7 +235,7 @@ export function backfillAccountBalances(db: DB, company: string, date: string, f
 export function seedAccountBalances(db: DB, flagged: string[] = []): number {
   const pending = db.prepare(`
     SELECT s.source, MAX(s.date) AS date FROM daily_snapshots s WHERE s.bucket = 'bank'
-      AND NOT EXISTS (SELECT 1 FROM account_balance_daily d JOIN accounts a ON a.id = d.account_id WHERE a.company = s.source)
+      AND NOT EXISTS (SELECT 1 FROM account_balance_daily d JOIN accounts a ON a.id = d.account_id WHERE COALESCE(a.source, a.company) = s.source)
     GROUP BY s.source
   `).all() as { source: string; date: string }[];
   let n = 0;

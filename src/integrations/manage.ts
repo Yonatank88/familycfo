@@ -4,6 +4,7 @@ import { SCRAPERS } from 'israeli-bank-scrapers';
 import { BANK_COMPANIES, SOURCE_NAMES } from '../db/ingestRepo.js';
 import type { Config } from '../scraper.js';
 import { investmentSourceId, type InvestmentSource } from '../sync/index.js';
+import { entryLabels, sourceIdOf } from '../config.js';
 
 /**
  * Add / edit / disable / remove the sources in accounts.json from the dashboard. Secrets never leave this module
@@ -54,14 +55,17 @@ export function listIntegrations(config: Config) {
     const v = entry[f.name];
     return [f.name, filled(v) ? { filled: true, masked: mask(v) } : { filled: false, masked: null }];
   }));
+  const labels = entryLabels(config.accounts);
   const banks = (config.accounts ?? []).map(raw => {
     const a = raw as AccountEntry;
-    const id = String(a.companyId);
-    const specs = bankFields(id) ?? Object.keys(a.credentials ?? {}).map(f => field(f));
+    const id = sourceIdOf(a);
+    const companyId = String(a.companyId);
+    const specs = bankFields(companyId) ?? Object.keys(a.credentials ?? {}).map(f => field(f));
     return {
-      key: keyOf('accounts', id), type: 'bank' as const, id, companyId: id, label: SOURCE_NAMES[id] ?? id, disabled: !!a.disabled, owner: a.owner ?? null,
+      key: keyOf('accounts', id), type: 'bank' as const, id, companyId, label: labels.get(id) ?? SOURCE_NAMES[companyId] ?? companyId,
+      disabled: !!a.disabled, owner: a.owner ?? null,
       fields: masked(a.credentials ?? {}, specs),
-      ...(id === 'oneZero' ? { linked: filled(a.credentials?.idToken) } : {}),
+      ...(companyId === 'oneZero' ? { linked: filled(a.credentials?.idToken) } : {}),
     };
   });
   const investments = (config.investments ?? []).map(raw => {
@@ -103,7 +107,7 @@ function findEntry(config: Config, key: string): { section: 'accounts' | 'invest
   const [section, ...rest] = key.split(':');
   const id = rest.join(':');
   if (section === 'accounts') {
-    const index = (config.accounts ?? []).findIndex(a => String(a.companyId) === id);
+    const index = (config.accounts ?? []).findIndex(a => sourceIdOf(a) === id);
     return index < 0 ? null : { section, index };
   }
   if (section === 'investments') {
@@ -138,13 +142,22 @@ export function applyDraft(config: Config, draft: Draft, key?: string): { config
   if (draft.type === 'bank') {
     const companyId = String(draft.companyId);
     if (at && at.section !== 'accounts') throw bad('type mismatch');
-    if (!at && next.accounts.some(a => String(a.companyId) === companyId)) throw bad(`${companyId} is already set up`);
+    // an edit keeps the entry's id; a new entry of a company already set up is another login: id <companyId>-<owner or n>
     const entry = (at ? next.accounts[at.index] : { companyId, credentials: {} }) as AccountEntry;
     entry.credentials = { ...(entry.credentials ?? {}), ...values };
     requireAll(entry.credentials);
     applyOwner(entry as unknown as Record<string, unknown>, draft.owner);
-    if (!at) next.accounts.push(entry as Config['accounts'][number]);
-    return { config: next, key: keyOf('accounts', companyId) };
+    if (!at) {
+      const taken = new Set(next.accounts.map(sourceIdOf));
+      if (taken.has(companyId)) {
+        const who = String(entry.owner ?? '').trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]+/g, '');
+        let id = who ? `${companyId}-${who}` : `${companyId}-2`;
+        for (let n = 2; taken.has(id); n++) id = `${companyId}-${n}`;
+        entry.id = id;
+        next.accounts.push({ id, ...entry } as Config['accounts'][number]);
+      } else next.accounts.push(entry as Config['accounts'][number]);
+    }
+    return { config: next, key: keyOf('accounts', sourceIdOf(entry)) };
   }
 
   next.investments ??= [];

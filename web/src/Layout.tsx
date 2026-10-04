@@ -50,13 +50,13 @@ function ScrapeStrip({ scrape }: { scrape: ReturnType<typeof useScrape> }) {
   const { state, running, error, otp } = scrape;
   const [code, setCode] = useState('');
   if (!state?.otp && !error && !running) return null;
-  const done = state?.companies.filter(c => c.status === 'done' || c.status === 'failed').length ?? 0;
+  const done = state?.companies.filter(c => c.status === 'done' || c.status === 'failed' || c.status === 'skipped').length ?? 0;
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-2 text-xs sm:px-6">
       {running && <span className="tabular-nums text-muted">{state?.status === 'pipeline' ? 'Processing…' : `Refreshing ${done}/${state?.companies.length ?? 0}`}</span>}
       {state?.otp && (
         <form className="flex items-center gap-1.5" onSubmit={e => { e.preventDefault(); otp(code.trim()); setCode(''); }}>
-          <label className="font-medium text-ink" htmlFor="otp">{state.otp.company} code</label>
+          <label className="font-medium text-ink" htmlFor="otp">{state.otp.label ?? state.otp.company} code</label>
           <input id="otp" value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" autoFocus
             className="min-h-9 w-24 rounded-lg border border-line bg-surface px-2.5 py-1 outline-none focus:border-accent" />
           <button type="submit" className={primaryButton}>Send</button>

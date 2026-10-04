@@ -1,6 +1,7 @@
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers';
 import { getDb, type DB } from './db/connection.js';
-import { saveScrapedAccount, recordSourceRun, beginSourceRun, NEEDS_CODE, NEEDS_ATTENTION } from './db/ingestRepo.js';
+import { saveScrapedAccount, recordSourceRun, beginSourceRun, NEEDS_CODE, NEEDS_ATTENTION, NOT_CONFIGURED } from './db/ingestRepo.js';
+import { credentialsFilled, entryLabels, matchesOnly, sourceIdOf } from './config.js';
 import { archiveRaw } from './ingest/archive.js';
 import type { InvestmentSource } from './sync/index.js';
 import * as readline from 'readline';
@@ -12,6 +13,8 @@ import { scrapeIsracardGroup, type IsracardGroupCredentials } from './scrapers/i
 import { markSubmit, startHapoalimWatcher } from './scrapers/hapoalim.js';
 
 interface AccountConfig {
+  /** the source id, when it isn't the companyId — a second login of one company (e.g. visaCal-hagar). Default: companyId */
+  id?: string;
   companyId: keyof typeof CompanyTypes;
   credentials: Record<string, string>;
   /** kept in the file, skipped by every run */
@@ -28,8 +31,8 @@ export interface Config {
 
 /** Lets a caller (the API's scrape job) run the scrape: answer the OTP and follow progress. */
 export interface ScrapeHooks {
-  /** asked when the bank shows its OTP screen; defaults to the terminal. '' gives up */
-  requestOtp?: (company: string) => Promise<string>;
+  /** asked when the bank shows its OTP screen (the source id, and its name — "Cal · Hagar"); defaults to the terminal. '' gives up */
+  requestOtp?: (company: string, label: string) => Promise<string>;
   onProgress?: (event: ScrapeProgress) => void;
   /** no one can answer an OTP (scheduled / no TTY): a source that asks for one stops at once as NEEDS_CODE, and a card
    * company whose last login was refused is skipped as NEEDS_ATTENTION. Default: `isUnattended` */
@@ -47,7 +50,7 @@ export interface OtpControl {
   onAbort: (abort: () => Promise<unknown>) => void;
 }
 
-export { NEEDS_CODE, NEEDS_ATTENTION };
+export { NEEDS_CODE, NEEDS_ATTENTION, NOT_CONFIGURED };
 
 /** Unattended = no OTP hook, and stdin isn't a terminal (launchd, cron) or UNATTENDED=1 (the launchd plist sets it). */
 export function isUnattended(hasOtpHook: boolean, stdinIsTTY = !!process.stdin.isTTY, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -86,18 +89,19 @@ export function otpControl(ask: (() => Promise<string>) | null): OtpControl & { 
     needsCode: () => needed,
   };
 }
+/** `company` = the source id (an entry's `id`, else its companyId) */
 export type ScrapeProgress =
   | { type: 'start'; company: string }
   | { type: 'done'; company: string; success: boolean; newTransactions: number; errorType?: string; errorMessage?: string };
 
-async function promptOtp(): Promise<string> {
+async function promptOtp(label: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
   return new Promise((resolve) => {
-    rl.question('\n🔐 Enter OTP code (5 digits): ', (answer) => {
+    rl.question(`\n🔐 ${label}: enter OTP code (5 digits): `, (answer) => {
       rl.close();
       resolve(answer.trim());
     });
@@ -109,7 +113,7 @@ const ISRACARD_GROUP = new Set(['isracard', 'amex']);
  * password was already checked — so a headless try can count toward the lockout */
 const ALWAYS_HEADFUL = ISRACARD_GROUP;
 const showBrowserFor = (company: string) => ALWAYS_HEADFUL.has(company) || process.env.SHOW_BROWSER !== '0';
-/** run in their own Chrome profile under data/browser-profile/<company> */
+/** run in their own Chrome profile under data/browser-profile/<source id> */
 const PERSISTENT_PROFILE = new Set(['hapoalim']);
 /** upcoming card charges and future installments */
 const FUTURE_MONTHS = 2;
@@ -121,7 +125,7 @@ async function libraryScrape(account: AccountConfig, startDate: Date, otp: OtpCo
   const showBrowser = showBrowserFor(account.companyId);
   // banks that ask for an SMS code on an unknown device get a persistent profile, so the bank may remember this one
   const browser = PERSISTENT_PROFILE.has(account.companyId)
-    ? await puppeteer.launch({ headless: !showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS, userDataDir: profileDir(account.companyId) })
+    ? await puppeteer.launch({ headless: !showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS, userDataDir: profileDir(sourceIdOf(account)) })
     : undefined;
   if (browser) otp.onAbort(() => browser.close());
   const scraper = createScraper({
@@ -171,6 +175,7 @@ async function libraryScrape(account: AccountConfig, startDate: Date, otp: OtpCo
 }
 
 export interface ScrapeSummary {
+  /** the source id */
   company: string;
   /** a bank / card company, or an investment source (src/sync/) */
   kind: 'bank' | 'investment';
@@ -185,38 +190,53 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
   if (Number.isNaN(startDate.getTime())) throw new Error(`SCRAPE_FROM is not a date: ${process.env.SCRAPE_FROM}`);
   if (!process.env.SCRAPE_FROM) startDate.setMonth(startDate.getMonth() - 3);
 
-  // SCRAPE_ONLY=visaCal,leumi limits the run to those companies
+  // SCRAPE_ONLY=visaCal,leumi limits the run to those companies (every login of each) or source ids (visaCal-hagar)
   const only = process.env.SCRAPE_ONLY?.split(',').map(s => s.trim()).filter(Boolean);
   const summaries: ScrapeSummary[] = [];
+  const labels = entryLabels(config.accounts);
+  const everSucceeded = db.prepare(`SELECT 1 FROM source_runs WHERE source = ? AND ok = 1 LIMIT 1`).pluck();
 
   for (const account of config.accounts ?? []) {
-    if (account.disabled || (only && !only.includes(account.companyId))) continue;
-    console.log(`Scraping ${account.companyId}...`);
-    hooks.onProgress?.({ type: 'start', company: account.companyId });
+    if (account.disabled || !matchesOnly(only, account)) continue;
+    const source = sourceIdOf(account);
+    const label = labels.get(source) ?? source;
+
+    // a placeholder (a credential empty) is never tried; a bank logged into by hand with empty credentials (Hapoalim)
+    // runs once it has succeeded — the same rule as the Integrations "Not configured" status
+    if (!credentialsFilled(account.credentials) && !everSucceeded.get(source)) {
+      console.log(`Skipping ${source}: not configured (a credential is empty)`);
+      summaries.push({ company: source, kind: 'bank', success: false, newTransactionIds: [], errorType: NOT_CONFIGURED });
+      hooks.onProgress?.({ type: 'done', company: source, success: false, newTransactions: 0, errorType: NOT_CONFIGURED, errorMessage: 'Not configured' });
+      continue;
+    }
+
+    console.log(`Scraping ${source}...`);
+    hooks.onProgress?.({ type: 'start', company: source });
     const startedAt = new Date().toISOString();
     const unattended = hooks.unattended ?? isUnattended(!!hooks.requestOtp);
 
     // Isracard / Amex: after a refused login, only a person (dashboard Refresh, CLI in a terminal) tries again
-    const refusal = unattended && ISRACARD_GROUP.has(account.companyId) ? lockoutGuard(db, account.companyId) : null;
+    const refusal = unattended && ISRACARD_GROUP.has(account.companyId) ? lockoutGuard(db, source) : null;
     if (refusal) {
       const errorMessage = `skipped unattended after "${refusal.slice(0, 120)}" — run it once from the dashboard Refresh`;
-      console.error(`Skipping ${account.companyId}: ${NEEDS_ATTENTION} ${errorMessage}`);
-      recordSourceRun(db, { source: account.companyId, startedAt, ok: false, error: `${NEEDS_ATTENTION}: ${errorMessage}` });
-      summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType: NEEDS_ATTENTION });
-      hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0, errorType: NEEDS_ATTENTION, errorMessage });
+      console.error(`Skipping ${source}: ${NEEDS_ATTENTION} ${errorMessage}`);
+      recordSourceRun(db, { source, startedAt, ok: false, error: `${NEEDS_ATTENTION}: ${errorMessage}` });
+      summaries.push({ company: source, kind: 'bank', success: false, newTransactionIds: [], errorType: NEEDS_ATTENTION });
+      hooks.onProgress?.({ type: 'done', company: source, success: false, newTransactions: 0, errorType: NEEDS_ATTENTION, errorMessage });
       continue;
     }
 
-    beginSourceRun(db, account.companyId, startedAt);
+    beginSourceRun(db, source, startedAt);
     let pageStateAtClose: string | undefined;
 
-    const otp = otpControl(hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : unattended ? null : promptOtp);
+    const otp = otpControl(hooks.requestOtp ? () => hooks.requestOtp!(source, label) : unattended ? null : () => promptOtp(label));
     try {
       const requestOtp = otp.request;
       const raw: CompanyResult = hooks.runCompany ? await hooks.runCompany(account, startDate, otp) : ISRACARD_GROUP.has(account.companyId)
         // our own scraper (src/scrapers/isracardGroup.ts): the library's login no longer works there
         ? await scrapeIsracardGroup({
           company: account.companyId as 'isracard' | 'amex',
+          profile: source,
           credentials: account.credentials as unknown as IsracardGroupCredentials,
           startDate,
           futureMonths: FUTURE_MONTHS,
@@ -231,35 +251,35 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
       const result: CompanyResult = otp.needsCode() ? { success: false, errorType: NEEDS_CODE, errorMessage: 'the bank asked for an SMS code' } : raw;
 
       if (!result.success) {
-        console.error(`Failed to scrape ${account.companyId}:`, result.errorType, result.errorMessage);
+        console.error(`Failed to scrape ${source}:`, result.errorType, result.errorMessage);
         if (pageStateAtClose) console.error(pageStateAtClose);
-        recordSourceRun(db, { source: account.companyId, startedAt, ok: false,
+        recordSourceRun(db, { source, startedAt, ok: false,
           error: [result.errorType, result.errorMessage].filter(Boolean).join(': ') });
-        summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType: result.errorType });
-        hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0,
+        summaries.push({ company: source, kind: 'bank', success: false, newTransactionIds: [], errorType: result.errorType });
+        hooks.onProgress?.({ type: 'done', company: source, success: false, newTransactions: 0,
           errorType: result.errorType, errorMessage: result.errorMessage });
         continue;
       }
 
-      // the untouched result, before it's normalized (data/raw/<company>/)
-      archiveRaw(account.companyId, result);
+      // the untouched result, before it's normalized (data/raw/<source id>/)
+      archiveRaw(source, result);
       const newIds: number[] = [];
       for (const acc of result.accounts ?? []) {
-        const saved = saveScrapedAccount(db, account.companyId, acc);
+        const saved = saveScrapedAccount(db, account.companyId, acc, source);
         newIds.push(...saved.insertedIds);
         const label = acc.savingsAccount ? ' (savings deposit)' : '';
         console.log(`  ${saved.accountId}${label}: balance ${acc.balance ?? '-'} ${acc.currency ?? 'ILS'}, ${saved.insertedIds.length} new, ${saved.updated} updated`);
       }
-      recordSourceRun(db, { source: account.companyId, startedAt, ok: true, asOf: new Date().toISOString() });
-      summaries.push({ company: account.companyId, kind: 'bank', success: true, newTransactionIds: newIds });
-      hooks.onProgress?.({ type: 'done', company: account.companyId, success: true, newTransactions: newIds.length });
+      recordSourceRun(db, { source, startedAt, ok: true, asOf: new Date().toISOString() });
+      summaries.push({ company: source, kind: 'bank', success: true, newTransactionIds: newIds });
+      hooks.onProgress?.({ type: 'done', company: source, success: true, newTransactions: newIds.length });
     } catch (err) {
       const errorType = otp.needsCode() ? NEEDS_CODE : 'EXCEPTION';
       const message = otp.needsCode() ? 'the bank asked for an SMS code' : err instanceof Error ? err.message : String(err);
-      console.error(`Error scraping ${account.companyId}:`, otp.needsCode() ? NEEDS_CODE : err);
-      recordSourceRun(db, { source: account.companyId, startedAt, ok: false, error: otp.needsCode() ? `${NEEDS_CODE}: ${message}` : String(err) });
-      summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType });
-      hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0, errorType, errorMessage: message });
+      console.error(`Error scraping ${source}:`, otp.needsCode() ? NEEDS_CODE : err);
+      recordSourceRun(db, { source, startedAt, ok: false, error: otp.needsCode() ? `${NEEDS_CODE}: ${message}` : String(err) });
+      summaries.push({ company: source, kind: 'bank', success: false, newTransactionIds: [], errorType });
+      hooks.onProgress?.({ type: 'done', company: source, success: false, newTransactions: 0, errorType, errorMessage: message });
     }
   }
   return summaries;

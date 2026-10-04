@@ -28,7 +28,8 @@ export const subTypeOf = (assetClass: string) => SUB_TYPE_LABELS[assetClass] ?? 
 const INVESTMENT_BUCKETS = new Set(['stock', 'mutual_fund', 'crypto', 'stablecoin', 'broker_cash', 'pension', 'study_fund', 'provident_fund', 'deposit', 'other']);
 export const STALE_MS = 36 * 3600_000;
 
-export const sourceLabel = (source: string) => SOURCE_NAMES[source] ?? source;
+/** A source id's name: the company / investment source, also for a second entry's id (`visaCal-hagar` → Cal). */
+export const sourceLabel = (source: string) => SOURCE_NAMES[source] ?? SOURCE_NAMES[source.replace(/-[^-]*$/, '')] ?? source;
 
 /**
  * A report product's name (holding source report:…): the product's name as printed in the report; "••1234" (its
@@ -186,17 +187,17 @@ export function summary(db: DB, asOf = today(), owners: Map<string, string> = ne
     valueIls: number | null; value: number | null; currency: string; asOf: string | null; lastSuccessAt: string | null; stale: boolean; fxMissing: boolean;
   }[] = [];
   const bankAccounts = db.prepare(`
-    SELECT a.id, a.company, a.display_name, COALESCE(a.currency, 'ILS') AS currency, b.balance, b.timestamp
+    SELECT a.id, a.company, COALESCE(a.source, a.company) AS source, a.display_name, COALESCE(a.currency, 'ILS') AS currency, b.balance, b.timestamp
     FROM accounts a LEFT JOIN balances b ON b.id = (SELECT MAX(id) FROM balances WHERE account_id = a.id)
     WHERE a.kind = 'bank' AND a.active = 1 ORDER BY a.company, a.id
-  `).all() as { id: string; company: string; display_name: string | null; currency: string; balance: number | null; timestamp: string | null }[];
+  `).all() as { id: string; company: string; source: string; display_name: string | null; currency: string; balance: number | null; timestamp: string | null }[];
   for (const a of bankAccounts) {
     const rate = rateToIls(db, a.currency, asOf);
     accounts.push({
-      id: a.id, source: a.company, sourceLabel: sourceLabel(a.company), label: (a.display_name ?? a.id).replace(/\s*···\s*/, ' ••'), kind: 'bank', assetClass: 'bank',
+      id: a.id, source: a.source, sourceLabel: sourceLabel(a.company), label: (a.display_name ?? a.id).replace(/\s*···\s*/, ' ••'), kind: 'bank', assetClass: 'bank',
       value: a.balance, currency: a.currency, valueIls: a.balance == null || rate == null ? null : round(a.balance * rate),
-      asOf: a.timestamp ? `${a.timestamp.replace(' ', 'T')}Z` : null, lastSuccessAt: status.get(a.company)?.last_ok ?? null,
-      stale: stale(a.company), fxMissing: a.balance != null && rate == null,
+      asOf: a.timestamp ? `${a.timestamp.replace(' ', 'T')}Z` : null, lastSuccessAt: status.get(a.source)?.last_ok ?? null,
+      stale: stale(a.source), fxMissing: a.balance != null && rate == null,
     });
   }
   const cardsBySource = new Map<string, number>();

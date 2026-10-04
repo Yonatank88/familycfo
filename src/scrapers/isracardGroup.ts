@@ -534,6 +534,8 @@ export function pagePostJson(page: Page): PostJson {
 
 export interface ScrapeIsracardGroupOptions {
   company: IsracardGroupCompany;
+  /** the Chrome profile under data/browser-profile/ — the source id (default: the company) */
+  profile?: string;
   credentials: IsracardGroupCredentials;
   startDate: Date;
   futureMonths: number;
@@ -557,7 +559,7 @@ export async function scrapeIsracardGroup(options: ScrapeIsracardGroupOptions): 
     // `--enable-automation` switch and no request interception (blocking its detector script is itself a tell).
     browser = await puppeteer.launch({
       headless: !options.showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS,
-      ignoreDefaultArgs: ['--enable-automation'], userDataDir: profileDir(company),
+      ignoreDefaultArgs: ['--enable-automation'], userDataDir: profileDir(options.profile ?? company),
     });
     page = (await browser.pages())[0] ?? await browser.newPage();
     page.setDefaultTimeout(120_000);

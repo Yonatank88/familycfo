@@ -191,6 +191,12 @@ const STEPS: { version: number; name: string; sql: string }[] = [
       PRIMARY KEY (date, account_id)
     );
   ` },
+  { version: 109, name: 'accounts.source', sql: `
+    -- the accounts.json entry (source id) that scraped the account, when it isn't the company itself (a second login
+    -- of one company, e.g. visaCal-hagar); NULL = the company. Snapshots, owners and integrations group by
+    -- COALESCE(source, company)
+    ALTER TABLE accounts ADD COLUMN source TEXT;
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 

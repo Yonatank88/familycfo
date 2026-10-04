@@ -2,6 +2,7 @@ import type { DB } from '../db/connection.js';
 import { BANK_COMPANIES, NEEDS_ATTENTION, NEEDS_CODE } from '../db/ingestRepo.js';
 import type { Config } from '../scraper.js';
 import { investmentSourceId } from '../sync/index.js';
+import { credentialsFilled, entryLabels, sourceIdOf } from '../config.js';
 import { round } from '../util.js';
 import { firstName } from './owners.js';
 import { STALE_MS, sourceLabel, summary } from './summary.js';
@@ -11,7 +12,11 @@ import { STALE_MS, sourceLabel, summary } from './summary.js';
 export type IntegrationStatus = 'ok' | 'failed' | 'needs_code' | 'needs_attention' | 'stale' | 'not_configured' | 'disabled';
 
 /** A source from accounts.json — only whether its credentials are filled, never their values. */
-export interface ConfiguredSource { id: string; kind: 'bank' | 'card' | 'investment'; configured: boolean; disabled?: boolean; owner?: string }
+export interface ConfiguredSource {
+  id: string; kind: 'bank' | 'card' | 'investment'; configured: boolean; disabled?: boolean; owner?: string;
+  /** a bank / card entry: its company, and its name when the company has more than one entry ("Cal · Hagar") */
+  companyId?: string; label?: string;
+}
 
 const filled = (v: unknown) => typeof v === 'string' && v.trim() !== '' && !/^YOUR_/.test(v.trim());
 
@@ -20,10 +25,13 @@ const owner = (full: string | undefined) => { const o = firstName(full); return 
 
 export function configuredSources(config: Config | null): ConfiguredSource[] {
   if (!config) return [];
+  const labels = entryLabels(config.accounts);
   const banks = (config.accounts ?? []).map(a => {
-    const values = Object.values(a.credentials ?? {});
-    return { id: String(a.companyId), kind: BANK_COMPANIES.has(String(a.companyId)) ? 'bank' as const : 'card' as const,
-      configured: values.length > 0 && values.every(filled), ...(a.disabled ? { disabled: true } : {}), ...owner(a.owner) };
+    const id = sourceIdOf(a);
+    const company = String(a.companyId);
+    return { id, kind: BANK_COMPANIES.has(company) ? 'bank' as const : 'card' as const,
+      configured: credentialsFilled(a.credentials), ...(a.disabled ? { disabled: true } : {}), ...owner(a.owner),
+      ...(id !== company ? { companyId: company } : {}), ...(labels.get(id) !== sourceLabel(id) ? { label: labels.get(id) } : {}) };
   });
   const investments = (config.investments ?? []).map(s => {
     const configured = s.type === 'ibkr' ? filled(s.token) && filled(s.queryId)
@@ -56,7 +64,7 @@ export function integrations(db: DB, sources: ConfiguredSource[], now = Date.now
   const s = summary(db);
   const recentRuns = db.prepare(`SELECT started_at AS at, ok, error FROM source_runs WHERE source = ? ORDER BY id DESC LIMIT 10`);
   const lastSuccess = db.prepare(`SELECT MAX(started_at) FROM source_runs WHERE source = ? AND ok = 1`).pluck();
-  const bankAccounts = db.prepare(`SELECT COUNT(*) FROM accounts WHERE company = ? AND active = 1`).pluck();
+  const bankAccounts = db.prepare(`SELECT COUNT(*) FROM accounts WHERE COALESCE(source, company) = ? AND active = 1`).pluck();
   const holdingStats = db.prepare(`SELECT COUNT(DISTINCT source) AS accounts, COUNT(*) AS holdings FROM holdings
     WHERE archived = 0 AND substr(source, 1, length(?) + 1) = ? || ':'`);
   const valueOf = (keep: (source: string) => boolean) => {
@@ -72,7 +80,8 @@ export function integrations(db: DB, sources: ConfiguredSource[], now = Date.now
       ? holdingStats.get(src.id, src.id) as { accounts: number; holdings: number }
       : { accounts: bankAccounts.get(src.id) as number, holdings: null };
     return {
-      id: src.id, key: `${src.kind === 'investment' ? 'investments' : 'accounts'}:${src.id}`, label: sourceLabel(src.id), kind: src.kind,
+      id: src.id, key: `${src.kind === 'investment' ? 'investments' : 'accounts'}:${src.id}`, label: src.label ?? sourceLabel(src.id), kind: src.kind,
+      companyId: src.companyId ?? src.id,
       owner: src.owner ?? null,
       status: integrationStatus({ configured: src.configured, disabled: src.disabled, lastRunOk: last ? last.ok : null, lastSuccessAt, lastError: last?.error }, now),
       lastSuccessAt, lastAttemptAt: last?.at ?? null, lastError: last && !last.ok ? last.error : null,

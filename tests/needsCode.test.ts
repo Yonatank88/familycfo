@@ -16,8 +16,8 @@ describe('NEEDS_CODE', () => {
     let aborted = false;
     const started = Date.now();
     const results = await scrapeAll({ accounts: [
-      { companyId: 'hapoalim', credentials: {} },
-      { companyId: 'oneZero', credentials: {} },
+      { companyId: 'hapoalim', credentials: { userCode: 'u', password: 'p' } },
+      { companyId: 'oneZero', credentials: { email: 'e', password: 'p' } },
     ] } as never, db, {
       unattended: true,
       runCompany: async (account, _start, otp) => {

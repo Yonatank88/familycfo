@@ -21,6 +21,7 @@ const KIND: Record<Integration['kind'], string> = { bank: 'Bank', card: 'Card', 
 
 /** One row of the table: an integration, or the uploaded reports as a row of type "Upload". */
 interface Row {
+  /** source: the colour's source (a bank / card entry's company) */
   key: string; source: string; label: string; type: string; owner: string | null; status: keyof typeof STATUS; error: string | null;
   lastSuccessAt: string | null; lastAttemptAt: string | null; runs: Integration['runs'] | null; valueIls: number | null;
   edit: () => void; editLabel: string;
@@ -77,7 +78,7 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
   const r = data.reports;
   const rows: Row[] = [
     ...data.sources.map(s => ({
-      key: s.key, source: s.id, label: s.label, type: KIND[s.kind], owner: s.owner, status: s.status, error: s.lastError ?? s.lastWarning,
+      key: s.key, source: s.companyId ?? s.id, label: s.label, type: KIND[s.kind], owner: s.owner, status: s.status, error: s.lastError ?? s.lastWarning,
       lastSuccessAt: s.lastSuccessAt, lastAttemptAt: s.lastAttemptAt, runs: s.runs, valueIls: s.valueIls,
       edit: () => onEdit(s.key), editLabel: 'Edit',
     })),

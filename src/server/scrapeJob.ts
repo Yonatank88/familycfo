@@ -1,9 +1,10 @@
 import type { DB } from '../db/connection.js';
-import { scrapeAll, type Config, type ScrapeProgress } from '../scraper.js';
+import { NOT_CONFIGURED, scrapeAll, type Config, type ScrapeProgress } from '../scraper.js';
 import { runPipeline } from '../pipeline.js';
 import { investmentSourceId, syncInvestments } from '../sync/index.js';
 // reads the bank credentials file; the credentials go only to the scraper and are never returned by the API
-import { loadConfig } from '../config.js';
+import { entryLabels, loadConfig, matchesOnly, sourceIdOf } from '../config.js';
+import { sourceLabel } from '../analytics/summary.js';
 
 /**
  * One scrape at a time, started from the UI: all banks, then the pipeline. The bank's OTP screen
@@ -11,8 +12,12 @@ import { loadConfig } from '../config.js';
  * a server restart (tsx watch) ends a running scrape.
  */
 export interface ScrapeCompanyState {
+  /** the source id */
   company: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  /** its name ("Cal · Hagar") */
+  label: string;
+  /** skipped: not configured (a credential empty, never succeeded) — no login was tried */
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
   newTransactions: number;
   error: string | null;
 }
@@ -22,7 +27,7 @@ export interface ScrapeJobState {
   finishedAt: string | null;
   companies: ScrapeCompanyState[];
   /** the bank is waiting for an OTP code */
-  otp: { company: string; requestedAt: string } | null;
+  otp: { company: string; label: string; requestedAt: string } | null;
   newTransactions: number;
   error: string | null;
   /** a "Test connection" run of one integration: saved = whether its settings were written (only when it succeeded) */
@@ -59,12 +64,13 @@ export function startScrape(db: DB, test?: { key: string; config: Config; onSucc
     throw Object.assign(new Error('the scraper configuration is missing or invalid (see accounts.example.json)'), { statusCode: 400 });
   }
   const only = process.env.SCRAPE_ONLY?.split(',').map(s => s.trim()).filter(Boolean);
+  const labels = entryLabels(config.accounts);
   state = {
     ...idle(), status: 'running', startedAt: new Date().toISOString(), test: test ? { key: test.key, saved: null } : null,
-    companies: [...(config.accounts ?? []).filter(a => !a.disabled).map(a => a.companyId),
-      ...(config.investments ?? []).filter(s => !s.disabled).map(investmentSourceId)]
-      .filter(company => !only || only.includes(company))
-      .map(company => ({ company, status: 'pending', newTransactions: 0, error: null })),
+    companies: [
+      ...(config.accounts ?? []).filter(a => !a.disabled && matchesOnly(only, a)).map(sourceIdOf),
+      ...(config.investments ?? []).filter(s => !s.disabled).map(investmentSourceId).filter(id => !only || only.includes(id)),
+    ].map(company => ({ company, label: labels.get(company) ?? sourceLabel(company), status: 'pending', newTransactions: 0, error: null })),
   };
 
   const onProgress = (event: ScrapeProgress) => {
@@ -74,15 +80,15 @@ export function startScrape(db: DB, test?: { key: string; config: Config; onSucc
       if (state.otp?.company === event.company) clearOtp();
       setCompany(event.company, event.success
         ? { status: 'done', newTransactions: event.newTransactions }
-        : { status: 'failed', error: event.errorMessage || event.errorType || 'error' });
+        : { status: event.errorType === NOT_CONFIGURED ? 'skipped' : 'failed', error: event.errorMessage || event.errorType || 'error' });
     }
   };
 
   (async () => {
     const results = await scrapeAll(config, db, {
-      requestOtp: company => new Promise<string>(resolve => {
+      requestOtp: (company, label) => new Promise<string>(resolve => {
         answerOtp = resolve;
-        state.otp = { company, requestedAt: new Date().toISOString() };
+        state.otp = { company, label, requestedAt: new Date().toISOString() };
       }),
       onProgress,
     });

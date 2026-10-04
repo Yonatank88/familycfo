@@ -21,7 +21,7 @@ describe('unattended detection', () => {
 });
 
 describe('Isracard lockout guard', () => {
-  const isracard = { accounts: [{ companyId: 'isracard', credentials: {} }] } as never;
+  const isracard = { accounts: [{ companyId: 'isracard', credentials: { id: 'i', card6Digits: 'c', password: 'p' } }] } as never;
   const at = (n: number) => `2026-10-0${n}T07:00:00.000Z`;
 
   it('after a BLOCKED / INVALID_PASSWORD run an unattended run skips it as NEEDS_ATTENTION until a success', async () => {
@@ -59,7 +59,7 @@ describe('Isracard lockout guard', () => {
     expect(lockoutGuard(db, 'amex')).toMatch(/^INVALID_PASSWORD/);
     recordSourceRun(db, { source: 'hapoalim', startedAt: at(1), ok: false, error: 'BLOCKED: x' });
     let calls = 0;
-    await scrapeAll({ accounts: [{ companyId: 'hapoalim', credentials: {} }] } as never, db,
+    await scrapeAll({ accounts: [{ companyId: 'hapoalim', credentials: { userCode: 'u', password: 'p' } }] } as never, db,
       { unattended: true, runCompany: async () => { calls++; return { success: true, accounts: [] }; } });
     expect(calls).toBe(1);
   });
@@ -109,7 +109,7 @@ describe('Hapoalim SMS step', () => {
   it('unattended scrape: the watcher maps to NEEDS_CODE and the source stops', async () => {
     const db = testDb();
     let aborted = false;
-    const results = await scrapeAll({ accounts: [{ companyId: 'hapoalim', credentials: {} }] } as never, db, {
+    const results = await scrapeAll({ accounts: [{ companyId: 'hapoalim', credentials: { userCode: 'u', password: 'p' } }] } as never, db, {
       unattended: true,
       runCompany: async (_account, _start, otp) => {
         otp.onAbort(async () => { aborted = true; });
