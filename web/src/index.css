@@ -15,6 +15,19 @@
   --color-up: #17a865;
   --color-down: #e5484d;
   --color-warn: #f2994a;
+
+  /* one fixed colour per source (≥ 3:1 on white, no two alike) — used wherever a source appears */
+  --color-src-onezero: #2563eb;
+  --color-src-hapoalim: #dc2626;
+  --color-src-otsarhahayal: #15803d;
+  --color-src-isracard: #7c3aed;
+  --color-src-max: #ea580c;
+  --color-src-ibkr: #0891b2;
+  --color-src-binance: #a16207;
+  --color-src-kraken: #c026d3;
+  --color-src-wallets: #4d7c0f;
+  --color-src-reports: #db2777;
+  --color-src-other: #64748b;
 }
 
 :root {

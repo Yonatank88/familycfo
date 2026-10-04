@@ -9,3 +9,17 @@ export const TYPE_LABELS: Record<string, string> = {
   bank: 'Bank', stock: 'Stocks & ETFs', funds: 'Funds', crypto: 'Crypto', stablecoin: 'Stablecoins', broker_cash: 'Broker cash',
   deposit: 'Deposits', other: 'Other',
 };
+
+/** Each source's colour token (index.css `--color-src-*`): banks, cards, brokers, exchanges, wallets; report products by provider fall back to Reports. */
+export const SOURCE_COLORS: Record<string, string> = {
+  oneZero: 'var(--color-src-onezero)', hapoalim: 'var(--color-src-hapoalim)', otsarHahayal: 'var(--color-src-otsarhahayal)',
+  isracard: 'var(--color-src-isracard)', max: 'var(--color-src-max)', ibkr: 'var(--color-src-ibkr)', binance: 'var(--color-src-binance)',
+  kraken: 'var(--color-src-kraken)', wallets: 'var(--color-src-wallets)', report: 'var(--color-src-reports)',
+};
+export const SOURCE_OTHER = 'var(--color-src-other)';
+/** A source id (company, investment source, `report` / `report:…`, or `<source>:<account>`) → its colour. */
+export const sourceColor = (source: string | null | undefined) => {
+  if (!source) return SOURCE_OTHER;
+  const id = source.split(':')[0];
+  return SOURCE_COLORS[id] ?? SOURCE_OTHER;
+};

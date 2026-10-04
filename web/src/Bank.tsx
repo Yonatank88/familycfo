@@ -4,7 +4,7 @@ import { Bar, ComposedChart, Line, LineChart, ReferenceLine, XAxis } from 'recha
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, type FlowRow, type Range } from './api';
-import { PALETTE } from './colors';
+import { sourceColor } from './colors';
 import { day, money, monthLong, monthShort, monthYear, monthYearTiny, shortDay, signedMoney, type Currency } from './format';
 import { BarList, Card, Dot, Name, RangeToggle, SidePanel } from './ui';
 import { cn } from '@/lib/utils';
@@ -15,13 +15,15 @@ const tone = (n: number) => (n === 0 ? 'text-muted' : n > 0 ? 'text-up' : 'text-
 
 /** "All accounts" and one pill per bank account. */
 function Pills({ accounts, value, onChange }: { accounts: { id: string; label: string }[]; value: string | null; onChange: (id: string | null) => void }) {
-  const pill = (active: boolean) => cn('min-h-9 rounded-full border px-3 text-xs font-medium',
+  const pill = (active: boolean) => cn('inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium',
     active ? 'border-transparent bg-accent/10 text-accent' : 'border-line bg-surface text-muted hover:text-ink');
   return (
     <div role="group" aria-label="Account" className="flex flex-wrap gap-1.5">
       <button type="button" aria-pressed={value == null} className={pill(value == null)} onClick={() => onChange(null)}>All accounts</button>
       {accounts.map(a => (
-        <button key={a.id} type="button" aria-pressed={value === a.id} className={pill(value === a.id)} onClick={() => onChange(a.id)}><Name text={a.label} /></button>
+        <button key={a.id} type="button" aria-pressed={value === a.id} className={pill(value === a.id)} onClick={() => onChange(a.id)}>
+          <Dot color={sourceColor(a.id)} className="h-1.5 w-1.5" /><Name text={a.label} />
+        </button>
       ))}
     </div>
   );
@@ -112,7 +114,8 @@ export default function Bank({ range, setRange, currency, convert }: {
 
   const series = data.balances.series;
   const currencyOf = (key: string) => series.find(s => s.key === key)?.currency ?? 'ILS';
-  const colorOf = (key: string) => PALETTE[Math.max(0, series.findIndex(s => s.key === key)) % PALETTE.length];
+  // the account's source colour; a foreign-currency account's line is dashed
+  const colorOf = (key: string) => sourceColor(key);
   const balanceConfig = Object.fromEntries(series.map(s => [s.key, { label: s.label }])) satisfies ChartConfig;
   const latest = data.balances.points.at(-1)?.values ?? {};
   const latestNative = data.balances.points.at(-1)?.native ?? {};
@@ -183,6 +186,7 @@ export default function Bank({ range, setRange, currency, convert }: {
                 ) : null} />
               {series.map(s => (
                 <Line key={s.key} dataKey={s.key} type="monotone" stroke={colorOf(s.key)} strokeWidth={1.5} dot={false}
+                  strokeDasharray={s.currency !== 'ILS' ? '4 3' : undefined}
                   activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} connectNulls />
               ))}
             </LineChart>

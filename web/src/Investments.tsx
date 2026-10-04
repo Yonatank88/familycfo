@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table';
 import { api, type Holding, type Range } from './api';
-import { OTHER, TYPE_COLORS, TYPE_LABELS } from './colors';
+import { OTHER, TYPE_COLORS, TYPE_LABELS, sourceColor } from './colors';
 import { day, money, pct, quantity, signedMoney, signedPct, type Currency } from './format';
-import { Card, Name, Parts, RangeToggle, SortHead, Tag } from './ui';
+import { Card, Dot, Name, Parts, RangeToggle, SortHead, Tag } from './ui';
 import { cn } from '@/lib/utils';
 
 const tone = (n: number | null | undefined) => (n == null || n === 0 ? 'text-muted' : n > 0 ? 'text-up' : 'text-down');
@@ -28,7 +28,7 @@ export default function Investments({ range, setRange, currency, convert }: {
         </>
       ) },
     { id: 'source', accessorFn: h => h.sourceLabel, header: ({ column }) => <SortHead label="Source" column={column} align="left" />,
-      cell: ({ row: { original: h } }) => <span className="text-muted"><bdi>{h.sourceLabel}</bdi></span> },
+      cell: ({ row: { original: h } }) => <span className="inline-flex items-center gap-1.5 text-muted"><Dot color={sourceColor(h.source)} /><bdi>{h.sourceLabel}</bdi></span> },
     { id: 'owner', accessorFn: h => h.owner ?? '', header: ({ column }) => <SortHead label="Owner" column={column} align="left" />,
       cell: ({ row: { original: h } }) => <span className="text-xs text-faint"><bdi>{h.owner}</bdi></span> },
     { id: 'type', accessorFn: h => TYPE_LABELS[h.type] ?? h.type, header: ({ column }) => <SortHead label="Type" column={column} align="left" />,
@@ -102,7 +102,7 @@ export default function Investments({ range, setRange, currency, convert }: {
           <li key={h.id} className="flex min-h-12 items-center gap-3 px-5 py-2">
             <div className="min-w-0 flex-1">
               <div className="break-words text-sm font-medium text-ink"><Name text={h.label} /></div>
-              <div className="truncate text-xs text-faint"><Parts parts={[h.sourceLabel, h.owner, h.openedAt ? day(h.openedAt) : null]} /></div>
+              <div className="flex items-center gap-1.5 truncate text-xs text-faint"><Dot color={sourceColor(h.source)} className="h-1.5 w-1.5" /><span className="truncate"><Parts parts={[h.sourceLabel, h.owner, h.openedAt ? day(h.openedAt) : null]} /></span></div>
             </div>
             <div className="shrink-0 text-right tabular-nums">
               <div className={cn('text-sm', h.fxMissing ? 'text-warn' : 'text-ink')}>{value(h)}</div>

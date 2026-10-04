@@ -4,7 +4,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { api, type Integration, type IntegrationStatus, type ReportItem } from './api';
 import { ago, asOf, money, type Currency } from './format';
 import { ReportList } from './reports';
-import { SidePanel, Tip } from './ui';
+import { sourceColor } from './colors';
+import { Dot, SidePanel, Tip } from './ui';
 
 const STATUS: Record<IntegrationStatus | 'review', { label: string; className: string; dot: string }> = {
   ok: { label: 'OK', className: 'bg-up/10 text-up', dot: 'bg-up' },
@@ -18,7 +19,7 @@ const KIND: Record<Integration['kind'], string> = { bank: 'Bank', card: 'Card', 
 
 /** One row of the table: an integration, or the uploaded reports as a row of type "Upload". */
 interface Row {
-  key: string; label: string; type: string; owner: string | null; status: keyof typeof STATUS; error: string | null;
+  key: string; source: string; label: string; type: string; owner: string | null; status: keyof typeof STATUS; error: string | null;
   lastSuccessAt: string | null; lastAttemptAt: string | null; runs: Integration['runs'] | null; valueIls: number | null;
   edit: () => void; editLabel: string;
 }
@@ -74,12 +75,12 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
   const r = data.reports;
   const rows: Row[] = [
     ...data.sources.map(s => ({
-      key: s.key, label: s.label, type: KIND[s.kind], owner: s.owner, status: s.status, error: s.lastError ?? s.lastWarning,
+      key: s.key, source: s.id, label: s.label, type: KIND[s.kind], owner: s.owner, status: s.status, error: s.lastError ?? s.lastWarning,
       lastSuccessAt: s.lastSuccessAt, lastAttemptAt: s.lastAttemptAt, runs: s.runs, valueIls: s.valueIls,
       edit: () => onEdit(s.key), editLabel: 'Edit',
     })),
     {
-      key: 'reports', label: 'Reports', type: 'Upload', owner: null, status: r.needsReview.length ? 'review' : r.imported ? 'ok' : 'not_configured',
+      key: 'reports', source: 'report', label: 'Reports', type: 'Upload', owner: null, status: r.needsReview.length ? 'review' : r.imported ? 'ok' : 'not_configured',
       error: r.failed ? `${r.failed} failed` : null, lastSuccessAt: r.lastImportAt, lastAttemptAt: null, runs: null, valueIls: r.valueIls,
       edit: () => setReportList(true), editLabel: 'Open',
     },
@@ -100,7 +101,7 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
           <TableBody>
             {rows.map(x => (
               <TableRow key={x.key} className="border-line hover:bg-paper">
-                <TableCell className="px-4 py-3 pl-5 font-medium text-ink"><bdi>{x.label}</bdi></TableCell>
+                <TableCell className="px-4 py-3 pl-5 font-medium text-ink"><span className="inline-flex items-center gap-2"><Dot color={sourceColor(x.source)} /><bdi>{x.label}</bdi></span></TableCell>
                 <TableCell className="px-4 py-3 text-muted">{x.type}</TableCell>
                 <TableCell className="px-4 py-3 text-faint"><bdi>{x.owner}</bdi></TableCell>
                 <TableCell className="px-4 py-3"><StatusBadge status={x.status} error={x.error} /></TableCell>

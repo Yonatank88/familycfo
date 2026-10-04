@@ -4,8 +4,12 @@ import { Bar, BarChart, Cell, XAxis } from 'recharts';
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
 import { api, type ExpenseFilter, type ExpenseSource, type Range } from './api';
 import { money, monthLong, monthShort, shortDay, type Currency } from './format';
-import { BarList, Card, Name, RangeToggle, SidePanel } from './ui';
+import { SOURCE_OTHER, sourceColor } from './colors';
+import { BarList, Card, Dot, Name, RangeToggle, SidePanel } from './ui';
 import { cn } from '@/lib/utils';
+
+/** A card's source colour; spend paid from the bank accounts is neutral. */
+const colorOf = (s: ExpenseSource) => (s.kind === 'card' ? sourceColor(s.key) : SOURCE_OTHER);
 
 const spendConfig = { total: { label: 'Spent' } } satisfies ChartConfig;
 
@@ -18,7 +22,7 @@ function SourcePills({ sources, value, onChange }: { sources: ExpenseSource[]; v
       <button type="button" aria-pressed={value == null} className={pill(value == null)} onClick={() => onChange(null)}>All</button>
       {sources.map(s => (
         <button key={s.key} type="button" aria-pressed={value === s.key} className={pill(value === s.key)} onClick={() => onChange(s.key)}>
-          <Name text={s.label} />
+          <Dot color={colorOf(s)} className="h-1.5 w-1.5" /><Name text={s.label} />
         </button>
       ))}
     </div>
@@ -31,7 +35,7 @@ function SourceCard({ s, active, onClick, fmt }: { s: ExpenseSource; active: boo
     <button type="button" onClick={onClick} aria-pressed={active}
       className={cn('flex min-w-0 flex-col rounded-2xl border bg-surface px-5 py-4 text-left shadow-[0_1px_2px_rgba(20,33,61,0.04)] hover:bg-paper/60',
         active ? 'border-accent' : 'border-line')}>
-      <span className="flex items-center gap-2 text-[13px] font-medium text-ink"><Name text={s.label} /></span>
+      <span className="flex items-center gap-2 text-[13px] font-medium text-ink"><Dot color={colorOf(s)} /><Name text={s.label} /></span>
       <span className="mt-2 text-[22px] font-semibold leading-tight tabular-nums text-ink">{fmt(s.thisMonth)}</span>
       <span className="text-xs tabular-nums text-muted">Last month {fmt(s.lastMonth)}</span>
       {s.kind === 'card' && (
