@@ -19,7 +19,6 @@ a live stock portfolio, and an optional AI chat that answers questions about you
 
 - [What it does](#what-it-does)
 - [Privacy and security](#privacy-and-security)
-- [Quick start — try the demo](#quick-start--try-the-demo)
 - [Setup with your own banks](#setup-with-your-own-banks)
 - [Brokers, wallets and exchanges](#brokers-wallets-and-exchanges)
 - [Everyday use](#everyday-use)
@@ -79,23 +78,11 @@ It understands how Israeli money actually moves:
 - The data chat can only read: a read-only SQL connection, whitelisted GET endpoints of the local API, and the files in
   `data/` (enforced by a hook that blocks reading anything else).
 
-## Quick start — try the demo
+## Setup with your own banks
 
 Requirements: **Node.js 20+** and npm. macOS or Linux (Windows works via WSL).
 
-```bash
-git clone https://github.com/nmazuz/familycfo.git && cd familycfo
-npm install            # also installs the web app's packages
-npm run demo           # builds demo.db with a made-up household (no bank login needed)
-npm run dev:demo       # API on 127.0.0.1:4310 + web app on http://127.0.0.1:5180
-```
-
-Open <http://127.0.0.1:5180>. The demo is a two-person household with five months of invented transactions, two bank
-accounts, two cards, a mortgage payment, savings and a small stock portfolio. Delete `demo.db` whenever you like.
-
-## Setup with your own banks
-
-1. **Install** (if you haven't): `npm install`. The scraper drives a real Chrome — it uses Google Chrome / Chromium if
+1. **Install:** `git clone https://github.com/Yonatank88/familycfo.git && cd familycfo && npm install`. The scraper drives a real Chrome — it uses Google Chrome / Chromium if
    installed, otherwise the one Puppeteer downloads.
 
 2. **Add your logins.** Copy the example and fill it in:
@@ -265,7 +252,6 @@ src/
   server/               Fastify API (127.0.0.1) + the data chat runner
   agent/                read-only MCP server and the document-read guard for the chat
   import/               pension and insurance report importers
-  demo.ts               the demo household
 web/                    Vite + React + Tailwind, Hebrew RTL
 agent/                  the data chat's instructions (CLAUDE.md) and skills
 tests/                  Vitest, in-memory SQLite

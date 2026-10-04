@@ -5,15 +5,14 @@ Thanks for helping! Bug reports, bank-specific fixes, new analytics and UI impro
 ## Before you start
 
 - **Never include real financial data** in an issue, a PR, a test or a screenshot — no account numbers, names,
-  balances, transaction descriptions or documents. Use the demo household (`npm run demo`) for screenshots and
-  reproduce bugs with made-up rows in a test.
+  balances, transaction descriptions or documents. Reproduce bugs with made-up rows in a test.
 - For a larger change, open an issue first to agree on the approach.
 
 ## Setup
 
 ```bash
 npm install
-npm run demo && npm run dev:demo   # work against the demo household
+BANK_DB=test.db npm run dev   # work against a scratch database
 ```
 
 Experiment on a copy of a real database, never on the original: `BANK_DB=copy.db npm run dev`.

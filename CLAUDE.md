@@ -12,7 +12,6 @@ npm run link -- onezero  # One-time One Zero SMS 2FA → saves credentials.otpLo
 npm run migrate    # Apply DB migrations (also runs automatically on open)
 npm test           # Vitest unit tests (in-memory SQLite)
 npm run typecheck  # API typecheck; web: npm --prefix web run typecheck
-npm run demo       # Build demo.db with made-up data; npm run dev:demo runs the app on it
 ```
 
 ## Architecture
@@ -49,4 +48,3 @@ Israeli bank scraper + local household-finance app for a family (members are con
 
 **Database:**
 - SQLite file: `bank.db` (auto-created and migrated on open; `BANK_DB` env overrides the path — use a copy for experiments). A new database gets default members and a default category tree (migration 14, with the card companies' category names as aliases).
-- `npm run demo` builds `demo.db` with an invented household (`src/demo.ts`); `npm run dev:demo` runs the app on it.

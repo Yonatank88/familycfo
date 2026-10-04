@@ -21,9 +21,7 @@
     "import:insurance": "tsx src/import/insurancePolicies.ts",
     "pipeline": "tsx src/pipeline.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "demo": "tsx src/demo.ts",
-    "dev:demo": "BANK_DB=demo.db npm run dev"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
