@@ -1,12 +1,13 @@
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers';
 import { getDb, type DB } from './db/connection.js';
-import { saveScrapedAccount, recordSourceRun, beginSourceRun } from './db/ingestRepo.js';
+import { saveScrapedAccount, recordSourceRun, beginSourceRun, NEEDS_CODE } from './db/ingestRepo.js';
 import { archiveRaw } from './ingest/archive.js';
 import type { InvestmentSource } from './sync/index.js';
 import * as readline from 'readline';
 import type { Page } from 'puppeteer';
 import type { ScrapedAccount } from './ingest/normalize.js';
-import { BROWSER_ARGS, describePage, findChromePath, maskAutomation } from './scrapers/browser.js';
+import puppeteer from 'puppeteer';
+import { BROWSER_ARGS, describePage, findChromePath, maskAutomation, profileDir } from './scrapers/browser.js';
 import { scrapeIsracardGroup, type IsracardGroupCredentials } from './scrapers/isracardGroup.js';
 
 interface AccountConfig {
@@ -29,6 +30,40 @@ export interface ScrapeHooks {
   /** asked when the bank shows its OTP screen; defaults to the terminal. '' gives up */
   requestOtp?: (company: string) => Promise<string>;
   onProgress?: (event: ScrapeProgress) => void;
+  /** no one can answer an OTP (scheduled / no TTY): a source that asks for one stops at once as NEEDS_CODE. Default:
+   * no requestOtp hook and stdin isn't a terminal */
+  unattended?: boolean;
+  /** replaces the per-company scrape (tests) */
+  runCompany?: (account: AccountConfig, startDate: Date, otp: OtpControl) => Promise<CompanyResult>;
+}
+
+/** What a scrape of one company returns: the library's result shape. */
+type CompanyResult = { success: true; accounts?: ScrapedAccount[] } | { success: false; errorType?: string; errorMessage?: string };
+
+/** A source's OTP channel: `request` asks for the code; `onAbort` registers how to stop the source at once. */
+export interface OtpControl {
+  request: () => Promise<string>;
+  onAbort: (abort: () => Promise<unknown>) => void;
+}
+
+export { NEEDS_CODE };
+
+/**
+ * The OTP channel of one source. Unattended, a request for a code marks the source as needing one, stops it (closing
+ * its browser) and answers '' — so it fails in seconds instead of waiting out the bank's timeout.
+ */
+export function otpControl(ask: (() => Promise<string>) | null): OtpControl & { needsCode: () => boolean } {
+  let needed = false;
+  let abort: (() => Promise<unknown>) | null = null;
+  return {
+    request: ask ?? (async () => {
+      needed = true;
+      await abort?.().catch(() => {});
+      return '';
+    }),
+    onAbort: fn => { abort = fn; },
+    needsCode: () => needed,
+  };
 }
 export type ScrapeProgress =
   | { type: 'start'; company: string }
@@ -95,13 +130,23 @@ async function startOtpWatcher(page: Page, requestOtp: () => Promise<string>): P
 }
 
 const ISRACARD_GROUP = new Set(['isracard', 'amex']);
+/** run in their own Chrome profile under data/browser-profile/<company> */
+const PERSISTENT_PROFILE = new Set(['hapoalim']);
 /** upcoming card charges and future installments */
 const FUTURE_MONTHS = 2;
 
 /** One company through israeli-bank-scrapers. */
-async function libraryScrape(account: AccountConfig, startDate: Date, requestOtp: () => Promise<string>,
+async function libraryScrape(account: AccountConfig, startDate: Date, otp: OtpControl,
   onPageClose: (description: string) => void) {
+  const requestOtp = otp.request;
+  const showBrowser = process.env.SHOW_BROWSER !== '0';
+  // banks that ask for an SMS code on an unknown device get a persistent profile, so the bank may remember this one
+  const browser = PERSISTENT_PROFILE.has(account.companyId)
+    ? await puppeteer.launch({ headless: !showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS, userDataDir: profileDir(account.companyId) })
+    : undefined;
+  if (browser) otp.onAbort(() => browser.close());
   const scraper = createScraper({
+    ...(browser ? { browser } : {}),
     companyId: CompanyTypes[account.companyId],
     startDate,
     futureMonthsToScrape: FUTURE_MONTHS,
@@ -110,7 +155,7 @@ async function libraryScrape(account: AccountConfig, startDate: Date, requestOtp
     includeRawTransaction: true,
     verbose: true,
     combineInstallments: false,
-    showBrowser: process.env.SHOW_BROWSER !== '0',
+    showBrowser,
     timeout: 120000, // 2 minutes for OTP
     defaultTimeout: 120000, // 2 minutes for navigation
     navigationRetryCount: 1,
@@ -167,9 +212,11 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
     beginSourceRun(db, account.companyId, startedAt);
     let pageStateAtClose: string | undefined;
 
+    const unattended = hooks.unattended ?? (!hooks.requestOtp && !process.stdin.isTTY);
+    const otp = otpControl(hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : unattended ? null : promptOtp);
     try {
-      const requestOtp = hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : promptOtp;
-      const result = ISRACARD_GROUP.has(account.companyId)
+      const requestOtp = otp.request;
+      const raw: CompanyResult = hooks.runCompany ? await hooks.runCompany(account, startDate, otp) : ISRACARD_GROUP.has(account.companyId)
         // our own scraper (src/scrapers/isracardGroup.ts): the library's login no longer works there
         ? await scrapeIsracardGroup({
           company: account.companyId as 'isracard' | 'amex',
@@ -178,9 +225,12 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
           futureMonths: FUTURE_MONTHS,
           showBrowser: process.env.SHOW_BROWSER !== '0',
           requestOtp,
+          finishByHand: !unattended && process.env.SHOW_BROWSER !== '0',
           onFailurePage: description => { pageStateAtClose = description; },
         }).then(r => (r.success ? { ...r, accounts: r.accounts as unknown as ScrapedAccount[] } : r))
-        : await libraryScrape(account, startDate, requestOtp, description => { pageStateAtClose = description; });
+        : await libraryScrape(account, startDate, otp, description => { pageStateAtClose = description; });
+      // unattended and the bank wanted a code: whatever the scrape then returned, that is why it stopped
+      const result: CompanyResult = otp.needsCode() ? { success: false, errorType: NEEDS_CODE, errorMessage: 'the bank asked for an SMS code' } : raw;
 
       if (!result.success) {
         console.error(`Failed to scrape ${account.companyId}:`, result.errorType, result.errorMessage);
@@ -206,11 +256,12 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
       summaries.push({ company: account.companyId, kind: 'bank', success: true, newTransactionIds: newIds });
       hooks.onProgress?.({ type: 'done', company: account.companyId, success: true, newTransactions: newIds.length });
     } catch (err) {
-      console.error(`Error scraping ${account.companyId}:`, err);
-      recordSourceRun(db, { source: account.companyId, startedAt, ok: false, error: String(err) });
-      summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType: 'EXCEPTION' });
-      hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0,
-        errorType: 'EXCEPTION', errorMessage: err instanceof Error ? err.message : String(err) });
+      const errorType = otp.needsCode() ? NEEDS_CODE : 'EXCEPTION';
+      const message = otp.needsCode() ? 'the bank asked for an SMS code' : err instanceof Error ? err.message : String(err);
+      console.error(`Error scraping ${account.companyId}:`, otp.needsCode() ? NEEDS_CODE : err);
+      recordSourceRun(db, { source: account.companyId, startedAt, ok: false, error: otp.needsCode() ? `${NEEDS_CODE}: ${message}` : String(err) });
+      summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType });
+      hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0, errorType, errorMessage: message });
     }
   }
   return summaries;

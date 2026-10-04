@@ -1,6 +1,11 @@
 import type { Page } from 'puppeteer';
 import { existsSync } from 'fs';
 import { platform } from 'os';
+import { join } from 'path';
+
+/** Chrome profiles that keep a site's device cookies between runs (git-ignored, under data/); `BROWSER_PROFILE_DIR` overrides. */
+export const PROFILE_DIR = process.env.BROWSER_PROFILE_DIR ?? join('data', 'browser-profile');
+export const profileDir = (company: string) => join(PROFILE_DIR, company);
 
 export function findChromePath(): string | undefined {
   const paths: Record<string, string[]> = {

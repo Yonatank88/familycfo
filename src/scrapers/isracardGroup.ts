@@ -14,11 +14,8 @@
  * don't know the difference.
  */
 import puppeteer, { type Browser, type HTTPResponse, type Page } from 'puppeteer';
-import { join } from 'path';
-import { BROWSER_ARGS, describePage, findChromePath, maskAutomation } from './browser.js';
+import { BROWSER_ARGS, describePage, findChromePath, maskAutomation, profileDir } from './browser.js';
 
-/** Chrome profiles for the card sites (git-ignored, under data/); `BROWSER_PROFILE_DIR` overrides. */
-const PROFILE_DIR = process.env.BROWSER_PROFILE_DIR ?? join('data', 'browser-profile');
 
 export type IsracardGroupCompany = 'isracard' | 'amex';
 
@@ -542,6 +539,8 @@ export interface ScrapeIsracardGroupOptions {
   futureMonths: number;
   showBrowser: boolean;
   requestOtp?: () => Promise<string>;
+  /** with the browser visible, wait for a login finished by hand (default: showBrowser; never in an unattended run) */
+  finishByHand?: boolean;
   /** where the browser was when it failed (visible text only) */
   onFailurePage?: (description: string) => void;
 }
@@ -558,7 +557,7 @@ export async function scrapeIsracardGroup(options: ScrapeIsracardGroupOptions): 
     // `--enable-automation` switch and no request interception (blocking its detector script is itself a tell).
     browser = await puppeteer.launch({
       headless: !options.showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS,
-      ignoreDefaultArgs: ['--enable-automation'], userDataDir: join(PROFILE_DIR, company),
+      ignoreDefaultArgs: ['--enable-automation'], userDataDir: profileDir(company),
     });
     page = (await browser.pages())[0] ?? await browser.newPage();
     page.setDefaultTimeout(120_000);
@@ -567,7 +566,7 @@ export async function scrapeIsracardGroup(options: ScrapeIsracardGroupOptions): 
     let login = await loginViaPage(page, company, credentials, { requestOtp: options.requestOtp });
     // With the browser visible, a login the page won't finish (bot block, CAPTCHA, an unexpected step) can be
     // finished by hand in the same window; the scrape then continues on that session.
-    if (login.state !== 'success' && options.showBrowser && !(login.state === 'failed' && ['ACCOUNT_BLOCKED', 'CHANGE_PASSWORD'].includes(login.errorType))) {
+    if (login.state !== 'success' && (options.finishByHand ?? options.showBrowser) && !(login.state === 'failed' && ['ACCOUNT_BLOCKED', 'CHANGE_PASSWORD'].includes(login.errorType))) {
       console.log(`\n⚠️  ${company}: ${login.state === 'failed' ? login.errorMessage : 'login did not finish'}`);
       console.log('   Finish the login by hand in the Chrome window (3 minutes) — the scrape continues once you are in.');
       const landed = await page.waitForFunction(() => !/\/personalarea\/login/i.test(location.pathname), { timeout: 180_000, polling: 1000 })

@@ -137,7 +137,7 @@ export interface ReportDetail extends Omit<ReportItem, 'products' | 'questions'>
   questions: Question[]; answers: Record<string, string>;
 }
 
-export type IntegrationStatus = 'ok' | 'failed' | 'stale' | 'not_configured' | 'disabled';
+export type IntegrationStatus = 'ok' | 'failed' | 'needs_code' | 'stale' | 'not_configured' | 'disabled';
 export interface Integration {
   id: string; key: string; label: string; kind: 'bank' | 'card' | 'investment'; status: IntegrationStatus;
   /** first name */

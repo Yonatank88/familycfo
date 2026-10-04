@@ -1,5 +1,5 @@
 import type { DB } from '../db/connection.js';
-import { BANK_COMPANIES } from '../db/ingestRepo.js';
+import { BANK_COMPANIES, NEEDS_CODE } from '../db/ingestRepo.js';
 import type { Config } from '../scraper.js';
 import { investmentSourceId } from '../sync/index.js';
 import { round } from '../util.js';
@@ -8,7 +8,7 @@ import { STALE_MS, sourceLabel, summary } from './summary.js';
 
 /** `/api/integrations`: each input source's health (from source_runs), what it brings, and the reports. */
 
-export type IntegrationStatus = 'ok' | 'failed' | 'stale' | 'not_configured' | 'disabled';
+export type IntegrationStatus = 'ok' | 'failed' | 'needs_code' | 'stale' | 'not_configured' | 'disabled';
 
 /** A source from accounts.json — only whether its credentials are filled, never their values. */
 export interface ConfiguredSource { id: string; kind: 'bank' | 'card' | 'investment'; configured: boolean; disabled?: boolean; owner?: string }
@@ -37,13 +37,14 @@ export function configuredSources(config: Config | null): ConfiguredSource[] {
 
 /**
  * Disabled › Not configured (credentials missing and it never succeeded — a bank logged into by hand in the browser,
- * like Hapoalim with empty credentials, is configured once it has a successful run) › Failed (the latest run failed) ›
+ * like Hapoalim with empty credentials, is configured once it has a successful run) › Needs code (the latest run, unattended,
+ * stopped at the bank's SMS code — a Refresh from the dashboard can answer it) › Failed (the latest run failed) ›
  * Stale (no success in 36 h) › OK.
  */
-export function integrationStatus(x: { configured: boolean; disabled?: boolean; lastRunOk: boolean | null; lastSuccessAt: string | null }, now = Date.now()): IntegrationStatus {
+export function integrationStatus(x: { configured: boolean; disabled?: boolean; lastRunOk: boolean | null; lastSuccessAt: string | null; lastError?: string | null }, now = Date.now()): IntegrationStatus {
   if (x.disabled) return 'disabled';
   if (!x.configured && !x.lastSuccessAt) return 'not_configured';
-  if (x.lastRunOk === false) return 'failed';
+  if (x.lastRunOk === false) return x.lastError?.startsWith(NEEDS_CODE) ? 'needs_code' : 'failed';
   if (!x.lastSuccessAt || now - Date.parse(x.lastSuccessAt) > STALE_MS) return 'stale';
   return 'ok';
 }
@@ -70,7 +71,7 @@ export function integrations(db: DB, sources: ConfiguredSource[], now = Date.now
     return {
       id: src.id, key: `${src.kind === 'investment' ? 'investments' : 'accounts'}:${src.id}`, label: sourceLabel(src.id), kind: src.kind,
       owner: src.owner ?? null,
-      status: integrationStatus({ configured: src.configured, disabled: src.disabled, lastRunOk: last ? last.ok : null, lastSuccessAt }, now),
+      status: integrationStatus({ configured: src.configured, disabled: src.disabled, lastRunOk: last ? last.ok : null, lastSuccessAt, lastError: last?.error }, now),
       lastSuccessAt, lastAttemptAt: last?.at ?? null, lastError: last && !last.ok ? last.error : null,
       // what a successful run couldn't read (an exchange's trade history refused…)
       lastWarning: last && last.ok ? last.error : null,
