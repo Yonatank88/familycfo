@@ -1,7 +1,6 @@
 import type { DB } from '../db/connection.js';
-import { round, today } from './common.js';
+import { round, today } from '../util.js';
 import { rateToIls } from './fx.js';
-import { startOf } from './quotes.js';
 
 /**
  * Stock-market holdings valued from their latest quote (src/analytics/quotes.ts), in ILS.
@@ -47,24 +46,6 @@ export interface HoldingValue {
   gainIlsPct: number | null;
   dayChangePct: number | null;
   dayChangeIls: number;
-}
-
-export interface Portfolio {
-  holdings: HoldingValue[];
-  totals: {
-    count: number;
-    valueIls: number;
-    costIls: number;
-    gainIls: number;
-    gainPct: number | null;
-    dayChangeIls: number;
-    dayChangePct: number | null;
-    quotesAsOf: string | null;
-    errors: number;
-  };
-  byCurrency: Record<string, number>;
-  byBroker: Record<string, number>;
-  history: { date: string; value: number }[];
 }
 
 type Row = Record<string, any>;
@@ -122,78 +103,3 @@ export function valueHolding(db: DB, h: Row, asOf = today()): HoldingValue {
 
 /** Every current holding at its latest price (no history) — for net worth. */
 export const holdingValues = (db: DB, asOf = today()) => loadHoldings(db).map(h => valueHolding(db, h, asOf));
-
-export function portfolio(db: DB, asOf = today()): Portfolio {
-  const rows = loadHoldings(db);
-  const holdings = rows.map(h => valueHolding(db, h, asOf));
-  const priced = holdings.filter(h => h.price != null);
-  const withCost = priced.filter(h => h.costIls != null);
-  const valueIls = priced.reduce((s, h) => s + h.valueIls, 0);
-  const costIls = withCost.reduce((s, h) => s + h.costIls!, 0);
-  const gainIls = withCost.reduce((s, h) => s + h.gainIls!, 0);
-  const dayChangeIls = holdings.reduce((s, h) => s + h.dayChangeIls, 0);
-  const sumBy = (key: (h: HoldingValue) => string) => holdings.reduce<Record<string, number>>((acc, h) => {
-    acc[key(h)] = round((acc[key(h)] ?? 0) + h.valueIls);
-    return acc;
-  }, {});
-  const fetched = rows.map(r => r.fetched_at).filter(Boolean).sort();
-
-  const history = portfolioHistory(db, rows);
-  // today's point is the live value
-  if (holdings.length) {
-    if (history.at(-1)?.date === asOf) history.pop();
-    history.push({ date: asOf, value: round(valueIls) });
-  }
-
-  return {
-    holdings,
-    totals: {
-      count: holdings.length,
-      valueIls: round(valueIls),
-      costIls: round(costIls),
-      gainIls: round(gainIls),
-      gainPct: costIls ? round((gainIls / costIls) * 100) : null,
-      dayChangeIls: round(dayChangeIls),
-      dayChangePct: valueIls - dayChangeIls ? round((dayChangeIls / (valueIls - dayChangeIls)) * 100) : null,
-      quotesAsOf: fetched.at(-1) ?? null,
-      errors: holdings.filter(h => h.quoteError).length,
-    },
-    byCurrency: sumBy(h => h.currency),
-    byBroker: sumBy(h => h.broker ?? ''),
-    history,
-  };
-}
-
-/**
- * Daily value of today's holdings since each one started (bought / baseline / added), from the stored closes.
- * Assumes the quantity didn't change since — a sold-off part isn't in the history.
- */
-export function portfolioHistory(db: DB, rows: Row[] = loadHoldings(db)): { date: string; value: number }[] {
-  if (!rows.length) return [];
-  const series = rows.map(h => ({
-    h,
-    start: startOf(h),
-    currency: (h.manual_price != null ? h.currency : h.quote_currency ?? h.currency) ?? 'ILS',
-    closes: h.manual_price != null ? [] : db.prepare(`SELECT date, close FROM quote_history WHERE symbol = ? ORDER BY date`).all(h.symbol) as { date: string; close: number }[],
-  }));
-  const first = series.reduce((m, s) => (s.start < m ? s.start : m), today());
-  const dates = [...new Set(series.flatMap(s => s.closes.map(c => c.date)))].filter(d => d >= first).sort();
-  const rates = new Map<string, number>();
-  const rate = (cur: string, d: string) => {
-    const k = `${cur}|${d}`;
-    if (!rates.has(k)) rates.set(k, rateToIls(db, cur, d) ?? 1);
-    return rates.get(k)!;
-  };
-  const idx = series.map(() => -1);
-  return dates.map(date => {
-    let value = 0;
-    series.forEach((s, i) => {
-      if (date < s.start) return;
-      if (s.h.manual_price != null) { value += s.h.manual_price * s.h.quantity * rate(s.currency, date); return; }
-      while (idx[i] + 1 < s.closes.length && s.closes[idx[i] + 1].date <= date) idx[i]++;
-      const close = s.closes[idx[i]]?.close;
-      if (close != null) value += close * s.h.quantity * rate(s.currency, date);
-    });
-    return { date, value: round(value) };
-  });
-}

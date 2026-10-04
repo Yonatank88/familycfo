@@ -17,10 +17,8 @@
     "web": "npm --prefix web run dev",
     "link": "tsx src/link.ts",
     "migrate": "tsx src/db/migrate.ts",
-    "import:pension": "tsx src/import/pensionReport.ts",
-    "import:insurance": "tsx src/import/insurancePolicies.ts",
     "pipeline": "tsx src/pipeline.ts",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,9 +1,9 @@
 import type { DB } from '../db/connection.js';
-import { addDays, today } from './common.js';
+import { today } from '../util.js';
 import { normalizeCurrency } from './fx.js';
 
 /**
- * Live market prices from Yahoo Finance's public chart / search endpoints (no key). Only symbols are sent —
+ * Live market prices from Yahoo Finance's public chart endpoint (no key). Only symbols are sent —
  * never quantities, values or who holds them.
  */
 const BASE = 'https://query1.finance.yahoo.com';
@@ -19,8 +19,6 @@ export interface Quote {
   instrumentType: string | null;
   marketTime: string | null;
 }
-
-export interface SymbolMatch { symbol: string; name: string; exchange: string | null; type: string | null }
 
 /** Yahoo quotes some markets in minor units: Tel Aviv in agorot (ILA), London in pence (GBp). Store major units. */
 export function majorUnits(currency: string | null | undefined): { currency: string; factor: number } {
@@ -56,30 +54,6 @@ export async function fetchQuote(symbol: string): Promise<Quote> {
     instrumentType: meta.instrumentType ?? null,
     marketTime: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
   };
-}
-
-/** Daily closes from `from` (YYYY-MM-DD) until today, dated in the exchange's own time zone. */
-export async function fetchHistory(symbol: string, from: string): Promise<{ date: string; close: number }[]> {
-  const period1 = Math.floor(Date.parse(`${from}T00:00:00Z`) / 1000);
-  const r = await chart(cleanSymbol(symbol), `period1=${period1}&period2=${Math.floor(Date.now() / 1000)}&interval=1d`);
-  const { factor } = majorUnits(r.meta?.currency);
-  const offset = Number(r.meta?.gmtoffset ?? 0);
-  const closes: (number | null)[] = r.indicators?.quote?.[0]?.close ?? [];
-  return ((r.timestamp ?? []) as number[])
-    .map((ts, i) => ({ date: new Date((ts + offset) * 1000).toISOString().slice(0, 10), close: closes[i] }))
-    .filter((p): p is { date: string; close: number } => typeof p.close === 'number')
-    .map(p => ({ date: p.date, close: p.close * factor }));
-}
-
-/** Find symbols by name or ticker (Latin only — Yahoo's search rejects Hebrew). */
-export async function searchSymbols(q: string): Promise<SymbolMatch[]> {
-  const res = await fetch(`${BASE}/v1/finance/search?q=${encodeURIComponent(q.trim())}&quotesCount=10&newsCount=0&listsCount=0`,
-    { headers: HEADERS, signal: AbortSignal.timeout(8000) });
-  if (!res.ok) return [];
-  const body = await res.json().catch(() => null) as any;
-  return ((body?.quotes ?? []) as any[])
-    .filter(x => x.symbol && ['EQUITY', 'ETF', 'MUTUALFUND', 'INDEX', 'CRYPTOCURRENCY'].includes(x.quoteType))
-    .map(x => ({ symbol: x.symbol, name: x.longname ?? x.shortname ?? x.symbol, exchange: x.exchDisp ?? x.exchange ?? null, type: x.typeDisp ?? x.quoteType ?? null }));
 }
 
 export function saveQuote(db: DB, q: Quote): void {
@@ -138,50 +112,4 @@ export function refreshQuotes(db: DB, maxAgeMs = 60_000): Promise<{ updated: num
     return { updated, failed };
   })().finally(() => { inFlight = null; });
   return inFlight;
-}
-
-const historyFetchedAt = new Map<string, number>();
-const HISTORY_TTL = 6 * 3600_000;
-
-/** Start date of a holding's track record: bought, else the baseline, else when it was added. */
-export const startOf = (h: { buy_date?: string | null; baseline_date?: string | null; created_at?: string | null }) =>
-  (h.buy_date ?? h.baseline_date ?? h.created_at ?? today()).slice(0, 10);
-
-/** Daily closes (and FX rates) from each symbol's earliest holding start — at most every few hours per symbol. */
-export async function refreshHistory(db: DB, force = false): Promise<number> {
-  const rows = db.prepare(`SELECT symbol, currency, buy_date, baseline_date, created_at FROM holdings WHERE archived = 0`).all() as Record<string, string | null>[];
-  const from = new Map<string, string>();
-  for (const h of rows) {
-    const start = addDays(startOf(h), -7);
-    const keys = [String(h.symbol)];
-    if (h.currency && h.currency !== 'ILS') keys.push(`${h.currency}ILS=X`);
-    for (const k of keys) if (!from.has(k) || start < from.get(k)!) from.set(k, start);
-  }
-  const manual = new Set(db.prepare(`SELECT symbol FROM holdings WHERE manual_price IS NOT NULL`).pluck().all() as string[]);
-  let points = 0;
-  await Promise.all([...from.entries()].map(async ([symbol, start]) => {
-    if (manual.has(symbol)) return;
-    const covered = db.prepare(`SELECT MIN(date) FROM quote_history WHERE symbol = ?`).pluck().get(symbol) as string | null;
-    const fresh = Date.now() - (historyFetchedAt.get(symbol) ?? 0) < HISTORY_TTL;
-    if (!force && fresh && covered && covered <= addDays(start, 7)) return;
-    try {
-      const fx = symbol.match(/^([A-Z]{3})ILS=X$/);
-      const history = await fetchHistory(symbol, start);
-      db.transaction(() => {
-        for (const p of history) {
-          if (fx) {
-            db.prepare(`INSERT INTO fx_rates (date, currency, rate_to_ils, source) VALUES (?, ?, ?, 'yahoo') ON CONFLICT(date, currency) DO NOTHING`)
-              .run(p.date, fx[1], p.close);
-          }
-          db.prepare(`INSERT INTO quote_history (symbol, date, close) VALUES (?, ?, ?) ON CONFLICT(symbol, date) DO UPDATE SET close = excluded.close`)
-            .run(symbol, p.date, p.close);
-        }
-      })();
-      historyFetchedAt.set(symbol, Date.now());
-      points += history.length;
-    } catch (err) {
-      console.warn(`  price history of ${symbol} not refreshed:`, (err as Error).message);
-    }
-  }));
-  return points;
 }

@@ -10,9 +10,8 @@ const config = loadConfig();
 async function run(cfg: Config): Promise<void> {
   const db = getDb();
   const results = [...await scrapeAll(cfg, db), ...await syncInvestments(cfg.investments, db)];
-  const newIds = results.flatMap(r => r.newTransactionIds);
   console.log(`\nScrape done: ${results.map(r => `${r.company} ${r.success ? '✓' : `✗ ${r.errorType}`}`).join(', ')}`);
-  const summary = await runPipeline(db, { txIds: newIds, categoryApiUrl: cfg.categoryApiUrl });
+  const summary = await runPipeline(db);
   console.log('Pipeline:', summary);
 }
 

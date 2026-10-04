@@ -1,5 +1,5 @@
 import type { DB } from '../db/connection.js';
-import { today } from '../analytics/common.js';
+import { today } from '../util.js';
 import { fetchQuote, saveQuote, type Quote } from '../analytics/quotes.js';
 
 /**

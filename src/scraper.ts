@@ -43,8 +43,6 @@ export interface Config {
   accounts: AccountConfig[];
   /** brokers, wallets and exchanges synced into holdings (src/sync/) */
   investments?: InvestmentSource[];
-  /** optional external categorizer: POST {description} → {category} */
-  categoryApiUrl?: string;
 }
 
 /** Lets a caller (the API's scrape job) run the scrape: answer the OTP and follow progress. */

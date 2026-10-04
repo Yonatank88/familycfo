@@ -84,7 +84,7 @@ export function startScrape(db: DB): ScrapeJobState {
     state.status = 'pipeline';
     const newIds = results.flatMap(r => r.newTransactionIds);
     state.newTransactions = newIds.length;
-    await runPipeline(db, { txIds: newIds, categoryApiUrl: config.categoryApiUrl });
+    await runPipeline(db);
     state.status = results.some(r => r.success) ? 'done' : 'failed';
     if (state.status === 'failed') state.error = 'no bank was scraped';
   })().catch(err => {
