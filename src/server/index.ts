@@ -96,7 +96,7 @@ app.get('/api/expenses', async req => {
 app.get('/api/expenses/rows', async req => {
   const q = req.query as Record<string, string>;
   if (!/^\d{4}-\d{2}$/.test(q.month ?? '')) throw badRequest('month must be YYYY-MM');
-  return expenseRowsOf(db, q.month, q.merchant || undefined);
+  return expenseRowsOf(db, q.month, { merchant: q.merchant || undefined, category: q.category || undefined });
 });
 
 // each fund (pension, study, provident, mutual) with its growth over the range and the returns its reports state

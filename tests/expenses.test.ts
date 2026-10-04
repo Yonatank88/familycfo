@@ -35,9 +35,23 @@ describe('expenses', () => {
   });
 
   it('lists the rows of a month and merchant', () => {
-    const rows = expenseRowsOf(db, '2026-04', 'shufersal', '2026-05-15');
+    const rows = expenseRowsOf(db, '2026-04', { merchant: 'shufersal' }, '2026-05-15');
     expect(rows.map(r => r.amount).sort((a, b) => a - b)).toEqual([-50, 100, 200]);
     expect(rows[0]).toHaveProperty('account');
+  });
+
+  it('totals spend by top-level category, uncategorised rows apart', () => {
+    const food = Number(db.prepare(`INSERT INTO categories (name) VALUES ('Food')`).run().lastInsertRowid);
+    const grocery = Number(db.prepare(`INSERT INTO categories (name, parent_id) VALUES ('Groceries', ?)`).run(food).lastInsertRowid);
+    db.prepare(`UPDATE transactions SET category_id = ? WHERE description LIKE 'Shufersal%'`).run(grocery);
+    const april = expenses(db, 12, '2026-05-15').months[0];
+    expect(april.categories).toEqual([
+      { key: String(food), name: 'Food', total: 250, count: 3 },
+      { key: 'none', name: 'Uncategorized', total: 30, count: 1 },
+    ]);
+    expect(expenseRowsOf(db, '2026-04', { category: String(food) }, '2026-05-15')).toHaveLength(3);
+    db.prepare(`UPDATE transactions SET category_id = NULL`).run();
+    db.prepare(`DELETE FROM categories`).run();
   });
 
   it('keeps only the last N months with data', () => {

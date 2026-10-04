@@ -112,6 +112,18 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     -- the returns a report prints for a product, JSON { ytd, m12, m36 } in % (each null when not printed)
     ALTER TABLE report_values ADD COLUMN returns TEXT;
   ` },
+  { version: 106, name: 'merchant_categories', sql: `
+    -- a merchant (merchantKey) → its category, decided once (src/categorize/); a low-confidence answer is cached too
+    -- (as the "unknown" category, or NULL when there is none) so the merchant isn't asked again
+    CREATE TABLE merchant_categories (
+      merchant TEXT PRIMARY KEY,
+      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      confidence REAL,
+      source TEXT NOT NULL CHECK (source IN ('ai','rule')),
+      model TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 
@@ -179,7 +191,7 @@ const BASELINE = `
     bank_identifier TEXT,
     source_category TEXT,                -- category supplied by the scraper
     category_id INTEGER REFERENCES categories(id),
-    category_source TEXT,                -- scraper
+    category_source TEXT,                -- scraper | ai | rule | manual
     kind TEXT,                           -- expense | income | refund | transfer | card_payment | savings
     kind_source TEXT,                    -- auto
     matched_txn_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,

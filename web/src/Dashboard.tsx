@@ -8,7 +8,7 @@ import { api, type ExpenseMonth, type Group, type Holding, type History, type Ra
 import { OTHER, PALETTE, TYPE_COLORS, TYPE_LABELS } from './colors';
 import { day, money, monthLong, monthShort, pct, shortDay, signedMoney, signedPct, type Currency } from './format';
 import { AccountGroups } from './Layout';
-import { Card, CardLink, ChangeChip, Dot, Name, Parts, Segmented, SidePanel, SubTag } from './ui';
+import { BarList, Card, CardLink, ChangeChip, Dot, Name, Parts, Segmented, SidePanel, SubTag } from './ui';
 import { cn } from '@/lib/utils';
 
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
@@ -150,11 +150,16 @@ function NetWorth({ s, h, range, setRange, group, setGroup, currency, convert, a
   );
 }
 
-function ExpenseRowsPanel({ month, merchant, onClose }: { month: string; merchant?: { key: string; name: string }; onClose: () => void }) {
-  const { data } = useQuery({ queryKey: ['expense-rows', month, merchant?.key], queryFn: () => api.expenseRows(month, merchant?.key) });
+type SpendFilter = { by: 'merchant' | 'category'; key: string; name: string };
+
+function ExpenseRowsPanel({ month, filter, onClose }: { month: string; filter?: SpendFilter; onClose: () => void }) {
+  const { data } = useQuery({
+    queryKey: ['expense-rows', month, filter?.by, filter?.key],
+    queryFn: () => api.expenseRows(month, filter ? { [filter.by]: filter.key } : {}),
+  });
   const total = data?.reduce((s, r) => s + r.amount, 0);
   return (
-    <SidePanel onClose={onClose} kicker={monthLong(month)} title={merchant ? <bdi dir="auto">{merchant.name}</bdi> : 'Transactions'}
+    <SidePanel onClose={onClose} kicker={monthLong(month)} title={filter ? <bdi dir="auto">{filter.name}</bdi> : 'Transactions'}
       meta={total != null && <span className="tabular-nums">{money(total)}</span>}>
       <div className="rounded-2xl border border-line bg-surface">
         <table className="w-full text-sm">
@@ -186,12 +191,15 @@ const spendConfig = { total: { label: 'Spent' } } satisfies ChartConfig;
 
 function Spending({ months, current }: { months: ExpenseMonth[]; current: string }) {
   const [selected, setSelected] = useState(months.some(m => m.month === current) ? current : months.at(-1)!.month);
-  const [panel, setPanel] = useState<{ month: string; merchant?: { key: string; name: string } } | null>(null);
+  const [panel, setPanel] = useState<{ month: string; filter?: SpendFilter } | null>(null);
   const idx = Math.max(0, months.findIndex(m => m.month === selected));
   const month = months[idx];
   const prev = months[idx - 1];
-  const merchants = month.merchants.slice(0, 5);
-  const top = merchants[0]?.total || 1;
+  // categories once any spend has one; merchants stay a toggle away
+  const hasCategories = months.some(m => m.categories.some(c => c.key !== 'none'));
+  const [view, setView] = useState<'category' | 'merchant'>('category');
+  const by = hasCategories ? view : 'merchant';
+  const items = (by === 'category' ? month.categories : month.merchants).slice(0, 5);
   return (
     <Card title="Spending" action={<CardLink onClick={() => setPanel({ month: month.month })}>Transactions</CardLink>}>
       <div className="text-center">
@@ -222,21 +230,16 @@ function Spending({ months, current }: { months: ExpenseMonth[]; current: string
           </Bar>
         </BarChart>
       </ChartContainer>
-      <ol className="mt-4 space-y-0.5 text-sm">
-        {merchants.map((m, i) => (
-          <li key={m.key}>
-            <button type="button" onClick={() => setPanel({ month: month.month, merchant: { key: m.key, name: m.name } })}
-              className="-mx-2 flex min-h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-paper">
-              <span className="min-w-0 flex-1 truncate text-ink"><bdi dir="auto">{m.name}</bdi></span>
-              <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-line sm:w-28">
-                <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (m.total / top) * 100)}%`, background: PALETTE[i % PALETTE.length] }} />
-              </span>
-              <span className="w-20 shrink-0 text-right tabular-nums text-ink">{money(m.total)}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
-      {panel && <ExpenseRowsPanel month={panel.month} merchant={panel.merchant} onClose={() => setPanel(null)} />}
+      {hasCategories && (
+        <div className="mt-4 flex justify-center">
+          <Segmented label="Group by" size="xs" value={view} onChange={setView}
+            options={[{ value: 'category', label: 'Categories' }, { value: 'merchant', label: 'Merchants' }]} />
+        </div>
+      )}
+      <div className="mt-3">
+        <BarList items={items} format={money} onSelect={item => setPanel({ month: month.month, filter: { by, ...item } })} />
+      </div>
+      {panel && <ExpenseRowsPanel month={panel.month} filter={panel.filter} onClose={() => setPanel(null)} />}
     </Card>
   );
 }

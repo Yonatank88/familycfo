@@ -17,6 +17,7 @@
     "web": "npm --prefix web run dev",
     "link": "tsx src/link.ts",
     "pipeline": "tsx src/pipeline.ts",
+    "categorize": "tsx src/categorize/cli.ts",
     "import": "tsx src/reports/cli.ts",
     "reports:reextract": "tsx src/reports/reextract.ts",
     "schedule:install": "scripts/schedule.sh install",

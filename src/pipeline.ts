@@ -1,5 +1,6 @@
 import { getDb, type DB } from './db/connection.js';
 import { categorizeTransactions, deriveKinds } from './ingest/classify.js';
+import { categorizeMerchants, type MerchantCategorizer } from './categorize/index.js';
 import { localDate } from './ingest/normalize.js';
 import { matchImmediateCardDebits, matchInternalTransfers, reconcileCardBills } from './ingest/transfers.js';
 import { backfillRates, refreshBoiRates } from './analytics/fx.js';
@@ -11,6 +12,8 @@ export interface PipelineOptions {
   /** the sources of this run: a snapshot is written only for the ones that succeeded */
   sources?: SourceOutcome[];
   fetchRates?: boolean;
+  /** the AI merchant categorizer (default: the user's `claude -p`); false skips it */
+  categorizer?: MerchantCategorizer | false;
 }
 
 /** The first day anything needs a rate for: the oldest transaction or snapshot. */
@@ -22,7 +25,7 @@ function ratesFrom(db: DB): string {
 
 /**
  * Everything that runs after a scrape, in order: FX → quotes → categorize → kinds → card bills → immediate card
- * debits → own-account transfers → snapshots.
+ * debits → own-account transfers → merchant categories (AI; once kinds are final, it only reads spend rows) → snapshots.
  */
 export async function runPipeline(db: DB = getDb(), opts: PipelineOptions = {}): Promise<Record<string, number>> {
   if (opts.fetchRates !== false) {
@@ -38,9 +41,17 @@ export async function runPipeline(db: DB = getDb(), opts: PipelineOptions = {}):
   const cardBills = reconcileCardBills(db);
   const debits = matchImmediateCardDebits(db);
   const transfers = matchInternalTransfers(db);
+  let merchantRows = 0;
+  if (opts.categorizer !== false) {
+    // never fails the pipeline: without the claude CLI the rows just stay uncategorised until the next run
+    try {
+      const ai = await categorizeMerchants(db, opts.categorizer ? { categorizer: opts.categorizer } : {});
+      merchantRows = ai.rows;
+    } catch (err) { console.warn('  merchants not categorised:', (err as Error).message); }
+  }
   const snapshots = writeSnapshots(db, opts.sources ?? []);
   return {
-    categorized, cardBillsKept: cardBills.kept, cardBillsDemoted: cardBills.demoted, immediateDebits: debits.matched, transfers,
+    categorized, merchantRows, cardBillsKept: cardBills.kept, cardBillsDemoted: cardBills.demoted, immediateDebits: debits.matched, transfers,
     snapshots: snapshots.written, bankDaysBackfilled: snapshots.backfilled, fxFlagged: snapshots.flagged.length,
   };
 }

@@ -3,7 +3,7 @@ import { SOURCE_NAMES } from '../db/ingestRepo.js';
 import { localDate } from '../ingest/normalize.js';
 import { addDays, cleanMerchantName, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
-import { rangeStart, type Range } from './summary.js';
+import { byCategory, rangeStart, topCategories, type Range, type TopCategory } from './summary.js';
 
 /**
  * The bank accounts' cash flow, by calendar month: money in, money out, net. Counted like expenses: transfers between
@@ -14,7 +14,7 @@ import { rangeStart, type Range } from './summary.js';
 
 const EXCLUDED = new Set(['transfer', 'card_payment']);
 
-export interface FlowRow { id: number; date: string; month: string; description: string; accountId: string; account: string; amount: number; moved: boolean }
+export interface FlowRow { id: number; date: string; month: string; description: string; accountId: string; account: string; amount: number; moved: boolean; kind: string | null; category: TopCategory }
 
 const accountLabel = (a: { id: string; display_name: string | null }) => (a.display_name ?? a.id).replace(/\s*···\s*/, ' ••');
 
@@ -27,11 +27,12 @@ function bankAccounts(db: DB) {
 export function flowRows(db: DB, account?: string, asOf = today()): FlowRow[] {
   const rows = db.prepare(`
     SELECT t.id, t.date, t.description, t.charged_amount, COALESCE(t.charged_currency, a.currency, 'ILS') AS currency, t.kind,
-      a.id AS account_id, a.display_name
+      t.category_id, a.id AS account_id, a.display_name
     FROM transactions t JOIN accounts a ON a.id = t.account_id
     WHERE a.kind = 'bank' AND a.active = 1 ${account ? 'AND a.id = @account' : ''}
   `).all(account ? { account } : {}) as { id: number; date: string; description: string; charged_amount: number; currency: string;
-    kind: string | null; account_id: string; display_name: string | null }[];
+    kind: string | null; category_id: number | null; account_id: string; display_name: string | null }[];
+  const topOf = topCategories(db);
   const month = asOf.slice(0, 7);
   const out: FlowRow[] = [];
   for (const r of rows) {
@@ -41,7 +42,8 @@ export function flowRows(db: DB, account?: string, asOf = today()): FlowRow[] {
     const rate = rateToIls(db, r.currency, day);
     if (rate == null) continue;
     out.push({ id: r.id, date: day, month: day.slice(0, 7), description: cleanMerchantName(r.description), accountId: r.account_id,
-      account: accountLabel({ id: r.account_id, display_name: r.display_name }), amount: round(r.charged_amount * rate), moved: r.kind === 'savings' });
+      account: accountLabel({ id: r.account_id, display_name: r.display_name }), amount: round(r.charged_amount * rate), moved: r.kind === 'savings',
+      kind: r.kind, category: topOf(r.category_id) });
   }
   return out;
 }
@@ -66,7 +68,7 @@ export function flowTotals(rows: FlowRow[]) {
 }
 
 /**
- * `/api/cashflow`: the range's months (in / out / net / moved), the bank accounts, and each account's daily balance from
+ * `/api/cashflow`: the range's months (in / out / net / moved), its spend by category, the bank accounts, and each account's daily balance from
  * the snapshots (one line per bank — the snapshots are per bank, carried over days without one).
  */
 export function cashFlow(db: DB, range: Range, account?: string, asOf = today()) {
@@ -101,6 +103,8 @@ export function cashFlow(db: DB, range: Range, account?: string, asOf = today())
     range, from: start,
     accounts: accounts.map(({ id, label }) => ({ id, label })),
     totals: flowTotals(inRange),
+    // the range's spend (expense / refund rows) by top-level category
+    categories: byCategory(inRange.filter(r => r.kind === 'expense' || r.kind === 'refund').map(r => ({ amount: -r.amount, category: r.category })), 6),
     months,
     balances: { series: companies.filter(c => by.get(c)!.size).map(c => ({ key: c, label: label(c) })), points },
   };

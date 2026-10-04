@@ -1,9 +1,9 @@
-import { spawn } from 'child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { extname, join } from 'path';
 import { fileURLToPath } from 'url';
 import readExcelFile from 'read-excel-file/node';
+import { runClaude } from '../ai/claude.js';
 
 /**
  * Report → structured balances, by the user's own Claude Code (`claude -p`, their subscription): Opus, structured output,
@@ -115,47 +115,6 @@ async function sheetText(file: string): Promise<string> {
     .join('\n')}`).join('\n\n');
 }
 
-function claudeEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  // the user's Claude subscription login, not an API key that may be set for other tools
-  delete env.ANTHROPIC_API_KEY;
-  // the API may itself run inside a Claude Code session
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
-  return env;
-}
-
-function runClaude(cwd: string, prompt: string): Promise<unknown> {
-  const args = [
-    '-p', '--model', MODEL, '--output-format', 'json', '--json-schema', JSON.stringify(EXTRACTION_SCHEMA),
-    // one tool, Read, confined to the temp dir (cwd = --add-dir); no settings, hooks, MCP servers or session files
-    '--tools', 'Read', '--allowedTools', 'Read', '--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch',
-    '--add-dir', cwd, '--restricted', '--strict-mcp-config', '--no-session-persistence', '--permission-mode', 'dontAsk',
-  ];
-  return new Promise((resolve, reject) => {
-    const child = spawn('claude', args, { cwd, env: claudeEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    const timer = setTimeout(() => child.kill('SIGTERM'), TIMEOUT_MS);
-    child.stdout.on('data', (c: Buffer) => { out += c.toString('utf8'); });
-    child.stderr.on('data', (c: Buffer) => { err += c.toString('utf8'); });
-    child.on('error', e => {
-      clearTimeout(timer);
-      reject((e as NodeJS.ErrnoException).code === 'ENOENT' ? new Error('Claude Code (claude) is not installed or not on PATH') : e);
-    });
-    child.on('close', code => {
-      clearTimeout(timer);
-      let result: Record<string, any> | null = null;
-      try { result = JSON.parse(out); } catch { /* reported below */ }
-      if (!result || result.is_error || code !== 0) {
-        return reject(new Error(String(result?.result ?? result?.subtype ?? (err.trim().slice(-600) || `claude exited with code ${code}`))));
-      }
-      if (result.structured_output == null) return reject(new Error('claude returned no structured output'));
-      resolve(result.structured_output);
-    });
-    child.stdin.end(prompt);
-  });
-}
-
 /** Read the report (or revise an earlier extraction of it) with Claude. */
 export const claudeExtractor: Extractor = async (file, revision) => {
   const dir = mkdtempSync(join(tmpdir(), 'familycfo-report-'));
@@ -172,7 +131,8 @@ export const claudeExtractor: Extractor = async (file, revision) => {
       prompt += `\n${promptFile('revise.md')}\n\nYour extraction:\n${JSON.stringify(revision.extraction, null, 1)}\n\n`
         + `Questions and answers:\n${revision.questions.map(q => `- ${q.text}\n  Answer: ${revision.answers[q.id] ?? '(none)'}`).join('\n')}\n`;
     }
-    return normalizeExtraction(await runClaude(dir, prompt));
+    // one tool, Read, confined to the temp dir
+    return normalizeExtraction(await runClaude({ cwd: dir, prompt, model: MODEL, schema: EXTRACTION_SCHEMA, tools: ['Read'], timeoutMs: TIMEOUT_MS }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

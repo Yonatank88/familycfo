@@ -50,7 +50,9 @@ export interface History {
   range: Range; from: string; series: { key: string; label: string }[]; points: HistoryPoint[];
   start: { netWorth: number | null; bank: number | null; investments: number | null; cardsOwed: number | null } | null;
 }
-export interface ExpenseMonth { month: string; total: number; merchants: { key: string; name: string; total: number; count: number }[] }
+export interface Ranked { key: string; name: string; total: number; count: number }
+/** categories: top-level, key = category id ('none' = uncategorised) */
+export interface ExpenseMonth { month: string; total: number; categories: Ranked[]; merchants: Ranked[] }
 export interface Expenses { currentMonth: string; months: ExpenseMonth[] }
 export interface ExpenseRow { id: number; date: string; description: string; account: string; amount: number }
 export interface Fund {
@@ -65,6 +67,8 @@ export interface Funds { range: Range; from: string; funds: Fund[] }
 export interface FlowTotals { in: number; out: number; net: number; moved: number }
 export interface CashFlow {
   range: Range; from: string; accounts: { id: string; label: string }[]; totals: FlowTotals;
+  /** the range's spend by top-level category */
+  categories: Ranked[];
   months: (FlowTotals & { month: string })[];
   /** daily balance per bank (the snapshots are per bank), ILS */
   balances: { series: { key: string; label: string }[]; points: { date: string; values: Record<string, number> }[] };
@@ -149,8 +153,8 @@ export const api = {
   summary: (range: Range) => request<Summary>(`/api/summary?range=${range}`),
   history: (range: Range, group: Group) => request<History>(`/api/history?range=${range}&group=${group}`),
   expenses: () => request<Expenses>('/api/expenses?months=12'),
-  expenseRows: (month: string, merchant?: string) =>
-    request<ExpenseRow[]>(`/api/expenses/rows?month=${month}${merchant ? `&merchant=${encodeURIComponent(merchant)}` : ''}`),
+  expenseRows: (month: string, filter: { merchant?: string; category?: string } = {}) =>
+    request<ExpenseRow[]>(`/api/expenses/rows?month=${month}${filter.merchant ? `&merchant=${encodeURIComponent(filter.merchant)}` : ''}${filter.category ? `&category=${encodeURIComponent(filter.category)}` : ''}`),
   funds: (range: Range) => request<Funds>(`/api/funds?range=${range}`),
   investments: (range: Range) => request<Investments>(`/api/investments?range=${range}`),
   cashFlow: (range: Range, account?: string) => request<CashFlow>(`/api/cashflow?range=${range}${account ? `&account=${encodeURIComponent(account)}` : ''}`),

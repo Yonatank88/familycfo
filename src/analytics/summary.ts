@@ -268,7 +268,34 @@ export function summary(db: DB, asOf = today(), owners: Map<string, string> = ne
 
 // ---- expenses ----------------------------------------------------------------------------------------------
 
-interface ExpenseRow { id: number; date: string; month: string; description: string; merchant: string; account: string; amount: number }
+interface ExpenseRow { id: number; date: string; month: string; description: string; merchant: string; account: string; amount: number; category: TopCategory }
+
+export interface TopCategory { key: string; name: string }
+export const UNCATEGORIZED: TopCategory = { key: 'none', name: 'Uncategorized' };
+/** Each category → its top-level category (the one spend is shown by); key = the top category's id. */
+export function topCategories(db: DB): (id: number | null) => TopCategory {
+  const cats = db.prepare(`SELECT id, name, parent_id FROM categories`).all() as { id: number; name: string; parent_id: number | null }[];
+  const byId = new Map(cats.map(c => [c.id, c]));
+  const top = new Map<number, TopCategory>();
+  for (const c of cats) {
+    let t = c;
+    for (let i = 0; t.parent_id != null && byId.has(t.parent_id) && i < 10; i++) t = byId.get(t.parent_id)!;
+    top.set(c.id, { key: String(t.id), name: t.name });
+  }
+  return id => (id != null && top.get(id)) || UNCATEGORIZED;
+}
+
+/** Spend per top-level category, largest first. */
+export function byCategory(rows: { amount: number; category: TopCategory }[], limit = 8) {
+  const by = new Map<string, { key: string; name: string; total: number; count: number }>();
+  for (const r of rows) {
+    const c = by.get(r.category.key) ?? { ...r.category, total: 0, count: 0 };
+    c.total += r.amount;
+    c.count++;
+    by.set(c.key, c);
+  }
+  return [...by.values()].filter(c => c.total > 0).sort((a, b) => b.total - a.total).slice(0, limit).map(c => ({ ...c, total: round(c.total) }));
+}
 
 /**
  * Spend rows: `kind = 'expense'` (positive amount) and refunds (negative), in ILS. Installments count on their charge
@@ -277,11 +304,12 @@ interface ExpenseRow { id: number; date: string; month: string; description: str
 function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
   const rows = db.prepare(`
     SELECT t.id, t.date, t.processed_date, t.description, t.charged_amount, COALESCE(t.charged_currency, 'ILS') AS currency,
-      t.kind, t.txn_type, t.installment_total, COALESCE(a.display_name, a.id) AS account
+      t.kind, t.txn_type, t.installment_total, t.category_id, COALESCE(a.display_name, a.id) AS account
     FROM transactions t JOIN accounts a ON a.id = t.account_id
     WHERE t.kind IN ('expense', 'refund')
   `).all() as { id: number; date: string; processed_date: string | null; description: string; charged_amount: number; currency: string;
-    kind: string; txn_type: string | null; installment_total: number | null; account: string }[];
+    kind: string; txn_type: string | null; installment_total: number | null; category_id: number | null; account: string }[];
+  const topOf = topCategories(db);
   const month = asOf.slice(0, 7);
   const out: ExpenseRow[] = [];
   for (const r of rows) {
@@ -291,12 +319,12 @@ function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
     const rate = rateToIls(db, r.currency, day);
     if (rate == null) continue;
     out.push({ id: r.id, date: day, month: day.slice(0, 7), description: r.description, merchant: merchantKey(r.description),
-      account: r.account, amount: round(-r.charged_amount * rate) });
+      account: r.account, amount: round(-r.charged_amount * rate), category: topOf(r.category_id) });
   }
   return out;
 }
 
-/** `/api/expenses`: the last `months` months that have spend — totals and the top merchants of each. */
+/** `/api/expenses`: the last `months` months that have spend — totals, the top categories and the top merchants of each. */
 export function expenses(db: DB, months = 12, asOf = today()) {
   const rows = expenseRows(db, asOf);
   const byMonth = new Map<string, ExpenseRow[]>();
@@ -317,6 +345,7 @@ export function expenses(db: DB, months = 12, asOf = today()) {
       return {
         month,
         total: round(list.reduce((a, r) => a + r.amount, 0)),
+        categories: byCategory(list),
         merchants: [...merchants].sort((a, b) => b[1].total - a[1].total).slice(0, 8).map(([key, m]) => ({
           key, name: cleanMerchantName([...m.names].sort((a, b) => b[1] - a[1])[0][0]), total: round(m.total), count: m.count,
         })),
@@ -325,10 +354,10 @@ export function expenses(db: DB, months = 12, asOf = today()) {
   };
 }
 
-/** `/api/expenses/rows`: the spend rows of a month, optionally of one merchant (its key from /api/expenses). */
-export function expenseRowsOf(db: DB, month: string, merchant?: string, asOf = today()) {
+/** `/api/expenses/rows`: the spend rows of a month, optionally of one merchant or top-level category (keys from /api/expenses). */
+export function expenseRowsOf(db: DB, month: string, filter: { merchant?: string; category?: string } = {}, asOf = today()) {
   return expenseRows(db, asOf)
-    .filter(r => r.month === month && (!merchant || r.merchant === merchant))
+    .filter(r => r.month === month && (!filter.merchant || r.merchant === filter.merchant) && (!filter.category || r.category.key === filter.category))
     .sort((a, b) => b.date.localeCompare(a.date) || b.amount - a.amount)
     .map(({ id, date, description, account, amount }) => ({ id, date, description, account, amount }));
 }

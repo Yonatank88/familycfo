@@ -5,6 +5,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { Range } from './api';
+import { OTHER, PALETTE } from './colors';
 
 /** "••1234": the last 4 digits of an account number — the only way one is shown. */
 export const mask = (last4: string | null | undefined) => {
@@ -47,6 +48,39 @@ export function CardLink({ onClick, children }: { onClick: () => void; children:
     <button type="button" onClick={onClick} className="-mr-2 flex min-h-9 items-center gap-0.5 rounded-lg px-2 text-[13px] text-muted hover:text-accent">
       {children}<ChevronRight className="size-3.5" />
     </button>
+  );
+}
+
+/**
+ * A ranked list with proportional bars (top merchants, top categories): name, bar, amount. Each row opens `onSelect`
+ * when given; the "none" key (uncategorised) is grey.
+ */
+export function BarList({ items, format, onSelect }: {
+  items: { key: string; name: string; total: number }[]; format: (n: number) => string; onSelect?: (item: { key: string; name: string }) => void;
+}) {
+  const top = items[0]?.total || 1;
+  return (
+    <ol className="space-y-0.5 text-sm">
+      {items.map((m, i) => {
+        const inner = (
+          <>
+            <span className="min-w-0 flex-1 truncate text-ink"><bdi dir="auto">{m.name}</bdi></span>
+            <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-line sm:w-28">
+              <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (m.total / top) * 100)}%`, background: m.key === 'none' ? OTHER : PALETTE[i % PALETTE.length] }} />
+            </span>
+            <span className="w-20 shrink-0 text-right tabular-nums text-ink">{format(m.total)}</span>
+          </>
+        );
+        const row = '-mx-2 flex min-h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left';
+        return (
+          <li key={m.key}>
+            {onSelect
+              ? <button type="button" onClick={() => onSelect({ key: m.key, name: m.name })} className={cn(row, 'hover:bg-paper')}>{inner}</button>
+              : <div className={row}>{inner}</div>}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

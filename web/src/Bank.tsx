@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { api, type FlowRow, type Range } from './api';
 import { PALETTE } from './colors';
 import { day, money, monthLong, monthShort, monthYear, monthYearTiny, shortDay, signedMoney, type Currency } from './format';
-import { Card, Dot, Name, RangeToggle, SidePanel } from './ui';
+import { BarList, Card, Dot, Name, RangeToggle, SidePanel } from './ui';
 import { cn } from '@/lib/utils';
 
 const IN = 'color-mix(in srgb, var(--color-up) 75%, white)';
@@ -116,6 +116,8 @@ export default function Bank({ range, setRange, currency, convert }: {
   const latest = data.balances.points.at(-1)?.values ?? {};
   const accountLabel = data.accounts.find(a => a.id === account)?.label ?? 'All accounts';
   const t = data.totals;
+  // spend by category, once any of it has one
+  const categories = data.categories.some(c => c.key !== 'none') ? data.categories : null;
 
   return (
     <div className="grid gap-5 lg:grid-cols-3">
@@ -187,7 +189,7 @@ export default function Bank({ range, setRange, currency, convert }: {
         </ul>
       </Card>
 
-      <Card title="Months" flush className="lg:col-span-3">
+      <Card title="Months" flush className={categories ? 'lg:col-span-2' : 'lg:col-span-3'}>
         <Table>
           <TableHeader>
             <TableRow className="border-line hover:bg-transparent">
@@ -212,6 +214,12 @@ export default function Bank({ range, setRange, currency, convert }: {
           </TableBody>
         </Table>
       </Card>
+
+      {categories && (
+        <Card title="Spending by category" className="lg:self-start">
+          <BarList items={categories} format={n => money(convert(n), currency)} />
+        </Card>
+      )}
 
       {month && <MonthPanel month={month} account={account} accountLabel={accountLabel} onClose={() => setMonth(null)} currency={currency} convert={convert} />}
     </div>
