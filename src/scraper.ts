@@ -242,7 +242,7 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
       });
 
       // One Zero without a long-term token (npm run link -- onezero) asks for the SMS code on every scrape
-      const credentials = account.companyId === 'oneZero' && !account.credentials.otpLongTermToken
+      const credentials = account.companyId === 'oneZero' && !account.credentials.idToken && !account.credentials.otpLongTermToken
         ? { ...account.credentials, otpCodeRetriever: hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : promptOtp }
         : account.credentials;
       const result = await scraper.scrape(credentials as never);

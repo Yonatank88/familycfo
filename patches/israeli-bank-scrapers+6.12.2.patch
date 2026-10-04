@@ -115,3 +115,37 @@ index 0000000..5b3be4e
 +
 +`,
 +};
+diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
+index 1bf8d21..57b157a 100644
+--- a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
++++ b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
+@@ -103,6 +103,21 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+     };
+   }
+   async login(credentials) {
++    // The otpToken from /otp/verify lives ~1 hour; /getIdToken's idToken lives ~10 years (sergienko4/israeli-bank-scrapers#576).
++    // With credentials.idToken, go straight to /sessions/token — no SMS, no otpToken.
++    if (credentials.idToken) {
++      const sessionResponse = await (0, _fetch.fetchPost)(`${IDENTITY_SERVER_URL}/sessions/token`, {
++        idToken: credentials.idToken,
++        pass: credentials.password
++      });
++      const accessToken = sessionResponse?.resultData?.accessToken;
++      if (!accessToken) {
++        return (0, _errors.createGenericError)(`One Zero rejected the idToken: ${JSON.stringify(sessionResponse?.errors ?? sessionResponse).slice(0, 200)}`);
++      }
++      this.idToken = credentials.idToken;
++      this.accessToken = accessToken;
++      return { success: true };
++    }
+     const otpTokenResult = await this.resolveOtpToken(credentials);
+     if (!otpTokenResult.success) {
+       return otpTokenResult;
+@@ -119,6 +134,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+         idToken
+       }
+     } = getIdTokenResponse;
++    this.idToken = idToken;
+     debug('Requesting session token');
+     const getSessionTokenResponse = await (0, _fetch.fetchPost)(`${IDENTITY_SERVER_URL}/sessions/token`, {
+       idToken,

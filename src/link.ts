@@ -1,8 +1,9 @@
 /**
  * One-time two-factor enrollment, so a bank that texts a code on every login scrapes unattended:
  *   npm run link -- onezero
- * One Zero sends an SMS to `credentials.phoneNumber`; the code is exchanged for a long-term token, saved into the
- * account's `credentials.otpLongTermToken` in accounts.json (never printed). Run it again when the token expires.
+ * One Zero sends an SMS to `credentials.phoneNumber`; the code buys a ~1-hour otpToken, which is traded right away for
+ * the ~10-year idToken (sergienko4/israeli-bank-scrapers#576), saved as `credentials.idToken` in accounts.json (never
+ * printed). Every later scrape logs in with it and no SMS. Run this again only when One Zero rejects the idToken.
  */
 import { readFileSync, writeFileSync } from 'fs';
 import * as readline from 'readline/promises';
@@ -32,12 +33,18 @@ async function main() {
   const result = await scraper.getLongTermTwoFactorToken(code);
   if (!result.success) throw new Error(`${result.errorType}: ${result.errorMessage ?? 'the code was not accepted'}`);
 
-  // edit the file as it is on disk (only this account's token changes)
+  // trade the short-lived otpToken for the long-lived idToken (the patched scraper keeps it on `idToken`)
+  const loginScraper = scraper as unknown as { login(c: Record<string, unknown>): Promise<{ success: boolean; errorMessage?: string }>; idToken?: string };
+  const login = await loginScraper.login({ ...account.credentials, idToken: undefined, otpLongTermToken: result.longTermTwoFactorAuthToken });
+  if (!login.success || !loginScraper.idToken) throw new Error(`login after the code failed: ${login.errorMessage ?? 'no idToken returned'}`);
+
+  // edit the file as it is on disk (only this account's credentials change)
   const file = JSON.parse(readFileSync(ACCOUNTS_FILE, 'utf-8')) as typeof config;
   const target = file.accounts.find(a => a.companyId === companyId)!;
-  target.credentials = { ...target.credentials, otpLongTermToken: result.longTermTwoFactorAuthToken };
+  const { otpLongTermToken: _expired, ...credentials } = target.credentials;
+  target.credentials = { ...credentials, idToken: loginScraper.idToken };
   writeFileSync(ACCOUNTS_FILE, JSON.stringify(file, null, 2) + '\n');
-  console.log(`✅ Linked. The long-term token is saved in ${ACCOUNTS_FILE}; ${companyId} now scrapes without a code.`);
+  console.log(`✅ Linked. The 10-year idToken is saved in ${ACCOUNTS_FILE}; ${companyId} now scrapes without a code.`);
 }
 
 main().catch(err => { console.error(err instanceof Error ? err.message : err); process.exitCode = 1; });

@@ -43,7 +43,7 @@ Requirements: **Node.js 20+** and npm, macOS or Linux.
    The full list is in the
    [israeli-bank-scrapers docs](https://github.com/eshaham/israeli-bank-scrapers#specific-definitions-per-scraper).
 
-   **One Zero** texts a code on every login. Link it once: `npm run link -- onezero` saves a long-term token into
+   **One Zero** texts a code on every login. Link it once: `npm run link -- onezero` saves a ~10-year token into
    `accounts.json` (never printed). Run it again when the token expires.
 
 3. **Brokers, wallets and exchanges** go in `investments` in `accounts.json`:
