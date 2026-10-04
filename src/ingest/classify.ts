@@ -10,6 +10,12 @@ export const CARD_PAYMENT_PATTERN = new RegExp(
 /** Standing orders into savings plans / deposits. */
 export const SAVINGS_PATTERN = /לחיסכון|לחסכון|פיקדון|פקדון|קופת גמל|השקעה ב/;
 
+/** Money sent to the household's broker and crypto exchanges, or buying crypto for a wallet — savings, not spend. */
+export const INVESTMENT_PATTERN = new RegExp([
+  'interactive\\s*brokers', '\\bibkr\\b', '\\bib llc\\b', 'binance', 'kraken', 'payward', 'coinbase', 'bit2c', 'bits of gold',
+  'moonpay', 'ramp network', 'transak', 'אינטראקטיב', 'בינאנס', 'קראקן', 'קרקן', 'ביטס אוף גולד',
+].join('|'), 'i');
+
 /** A category by name, following aliases left by renames and merges. */
 export function findCategory(db: DB, name: string): number | undefined {
   return (db.prepare(`SELECT id FROM categories WHERE name = ?`).pluck().get(name)
@@ -60,6 +66,7 @@ export function kindFor(r: { description: string; charged_amount: number; accoun
   }
   if (r.category_kind === 'card_payment' && r.account_kind === 'bank') return 'card_payment';
   if (r.account_kind === 'bank' && r.charged_amount < 0 && SAVINGS_PATTERN.test(r.description)) return 'savings';
+  if (r.charged_amount < 0 && INVESTMENT_PATTERN.test(r.description)) return 'savings';
   if (r.category_kind === 'transfer' || r.category_kind === 'savings') return r.category_kind;
   if (r.charged_amount > 0) {
     return r.category_kind === 'income' || r.account_kind === 'bank' ? 'income' : 'refund';
