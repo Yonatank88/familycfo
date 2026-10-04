@@ -1,5 +1,5 @@
 import type { DB } from '../db/connection.js';
-import { today } from '../util.js';
+import { addDays, today } from '../util.js';
 import { normalizeCurrency, saveMarketRate } from './fx.js';
 
 /**
@@ -117,4 +117,22 @@ export function refreshQuotes(db: DB, maxAgeMs = 60_000): Promise<{ updated: num
     return { updated, failed };
   })().finally(() => { inFlight = null; });
   return inFlight;
+}
+
+const changeCache = new Map<string, { at: number; pct: number | null }>();
+
+/** Price change of a symbol since `from` (its close on/before that day → its latest close), %; null when unknown. Cached 1 h. */
+export async function priceChangeSince(symbol: string, from: string): Promise<number | null> {
+  const key = `${symbol}|${from}`;
+  const hit = changeCache.get(key);
+  if (hit && Date.now() - hit.at < 3600_000) return hit.pct;
+  let pct: number | null = null;
+  try {
+    const closes = await fetchDailyCloses(symbol, addDays(from, -7));
+    const base = closes.filter(c => c.date <= from).at(-1);
+    const last = closes.at(-1);
+    pct = base && last && base.close ? ((last.close / base.close) - 1) * 100 : null;
+  } catch { /* unknown */ }
+  changeCache.set(key, { at: Date.now(), pct });
+  return pct;
 }
