@@ -195,8 +195,11 @@ export async function loginViaPage(page: Page, company: IsracardGroupCompany, cr
     await page.waitForSelector(SELECTORS.password, { visible: true, timeout: 10_000 });
     await jitter(500, 1000);
 
+    // The password field drops every key outside [a-z0-9] (its `englishAndNumbers` keydown handler), so a stored
+    // password with a symbol logs in on the site as its letters and digits only — send exactly that.
+    const password = credentials.password.replace(/[^a-z0-9]/gi, '');
     for (const [selector, value] of [[SELECTORS.id, credentials.id], [SELECTORS.card6Digits, credentials.card6Digits],
-      [SELECTORS.password, credentials.password]] as const) {
+      [SELECTORS.password, password]] as const) {
       await page.click(selector);
       await page.type(selector, value, { delay: 70 + Math.random() * 60 });
       await jitter(300, 700);
@@ -210,7 +213,7 @@ export async function loginViaPage(page: Page, company: IsracardGroupCompany, cr
       formValid: document.querySelector(s.form)?.classList.contains('ng-valid') ?? false,
     }), SELECTORS);
     if (typed.id !== credentials.id.length || typed.card !== credentials.card6Digits.length
-      || typed.password !== credentials.password.length || !typed.formValid) {
+      || typed.password !== password.length || !typed.formValid) {
       return { state: 'failed', errorType: 'GENERIC',
         errorMessage: `login form not filled as expected (lengths id ${typed.id}, card ${typed.card}, form ${typed.formValid ? 'valid' : 'invalid'}) — password not submitted` };
     }
