@@ -12,6 +12,8 @@ export interface Holding {
   pctOfInvestments: number | null; changePct: number | null; fxMissing: boolean;
   /** since purchase, from the source's cost basis (IBKR only) */
   gainIls: number | null; gainPct: number | null;
+  /** when a report product can be withdrawn (study funds) */
+  liquidityDate: string | null;
 }
 export interface Slice { key: string; label: string; value: number }
 export interface Summary {
@@ -36,6 +38,21 @@ export interface ScrapeState {
   error: string | null;
 }
 
+export type ReportStatus = 'extracting' | 'needs_review' | 'applied' | 'superseded' | 'failed';
+export interface ReportItem {
+  id: number; name: string | null; issuer: string | null; reportType: string | null; asOf: string | null; status: ReportStatus;
+  error: string | null; createdAt: string; appliedAt: string | null; products: number; questions: number;
+}
+export interface Question { id: string; text: string; options?: string[] }
+export interface ReportProduct {
+  key: string; provider: string; productType: string; accountNumber: string | null; name: string; balance: number; currency: string;
+  liquidityDate: string | null; confidence: number; evidence: string; holdingSource: string | null; known: boolean | null;
+}
+export interface ReportDetail extends Omit<ReportItem, 'products' | 'questions'> {
+  owner: string | null; statedTotal: number | null; currency: string | null; products: ReportProduct[];
+  questions: Question[]; answers: Record<string, string>;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   const body = await res.json().catch(() => null);
@@ -56,4 +73,14 @@ export const api = {
   scrape: () => request<ScrapeState>('/api/scrape'),
   startScrape: () => post<ScrapeState>('/api/scrape'),
   submitOtp: (code: string) => post<{ ok: true }>('/api/scrape/otp', { code }),
+  reports: () => request<ReportItem[]>('/api/reports'),
+  report: (id: number) => request<ReportDetail>(`/api/reports/${id}`),
+  uploadReport: (file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return request<{ id: number; status: ReportStatus; duplicate: boolean }>('/api/reports', { method: 'POST', body: form });
+  },
+  answerReport: (id: number, answers: Record<string, string>, edits: { asOf?: string; balances?: Record<string, number> }) =>
+    post<{ id: number; status: ReportStatus }>(`/api/reports/${id}/answers`, { answers, edits }),
+  deleteReport: (id: number) => request<{ ok: true }>(`/api/reports/${id}`, { method: 'DELETE' }),
 };
