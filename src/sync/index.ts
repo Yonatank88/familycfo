@@ -1,5 +1,5 @@
 import type { DB } from '../db/connection.js';
-import { recordScrapeRun } from '../db/ingestRepo.js';
+import { recordSourceRun } from '../db/ingestRepo.js';
 import { archiveRaw } from '../ingest/archive.js';
 import type { ScrapeHooks, ScrapeSummary } from '../scraper.js';
 import { syncHoldings, type SyncedAccount } from './holdings.js';
@@ -13,7 +13,7 @@ export type InvestmentSource = IbkrSource | WalletsSource | ExchangeSource;
 /** The id a source is known by: SCRAPE_ONLY, sync status, `data/raw/<id>/`, and the prefix of its holdings' source. */
 export const investmentSourceId = (s: InvestmentSource) => s.id ?? (s.type === 'exchange' ? s.exchange : s.type);
 
-function fetchSource(s: InvestmentSource): Promise<{ raw: unknown; accounts: SyncedAccount[] }> {
+function fetchSource(s: InvestmentSource): Promise<{ raw: unknown; accounts: SyncedAccount[]; asOf?: string | null }> {
   switch (s.type) {
     case 'ibkr': return fetchIbkr(s);
     case 'wallets': return fetchWallets(s);
@@ -24,7 +24,7 @@ function fetchSource(s: InvestmentSource): Promise<{ raw: unknown; accounts: Syn
 
 /**
  * Sync every configured investment source into holdings, one after the other; a failing source is recorded in
- * scrape_runs like a failed bank and leaves its holdings as they were. Runs with the bank scrape (before the pipeline,
+ * source_runs like a failed bank and leaves its holdings as they were. Runs with the bank scrape (before the pipeline,
  * which refreshes the quotes). Reports progress with the same events as the banks.
  */
 export async function syncInvestments(sources: InvestmentSource[] = [], db: DB, hooks: Pick<ScrapeHooks, 'onProgress'> = {}): Promise<ScrapeSummary[]> {
@@ -37,18 +37,18 @@ export async function syncInvestments(sources: InvestmentSource[] = [], db: DB, 
     hooks.onProgress?.({ type: 'start', company: id });
     const startedAt = new Date().toISOString();
     try {
-      const { raw, accounts } = await fetchSource(source);
+      const { raw, accounts, asOf } = await fetchSource(source);
       archiveRaw(id, raw);
       const r = await syncHoldings(db, id, accounts);
       console.log(`  ${accounts.length} account(s): ${r.added} new, ${r.updated} updated, ${r.removed} gone${r.manual ? `, ${r.manual} at the source's price (no quote)` : ''}`);
-      recordScrapeRun(db, { company: id, startedAt, success: true, newTransactions: r.added });
-      summaries.push({ company: id, success: true, newTransactionIds: [] });
+      recordSourceRun(db, { source: id, startedAt, ok: true, asOf: asOf ?? new Date().toISOString() });
+      summaries.push({ company: id, kind: 'investment', success: true, newTransactionIds: [] });
       hooks.onProgress?.({ type: 'done', company: id, success: true, newTransactions: r.added });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Failed to sync ${id}:`, message);
-      recordScrapeRun(db, { company: id, startedAt, success: false, errorType: 'SYNC_FAILED', errorMessage: message });
-      summaries.push({ company: id, success: false, newTransactionIds: [], errorType: 'SYNC_FAILED' });
+      recordSourceRun(db, { source: id, startedAt, ok: false, error: message });
+      summaries.push({ company: id, kind: 'investment', success: false, newTransactionIds: [], errorType: 'SYNC_FAILED' });
       hooks.onProgress?.({ type: 'done', company: id, success: false, newTransactions: 0, errorType: 'SYNC_FAILED', errorMessage: message });
     }
   }

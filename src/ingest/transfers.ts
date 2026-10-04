@@ -25,13 +25,13 @@ const DEBIT_MAX_LAG_DAYS = 5;
 export function matchImmediateCardDebits(db: DB): { matched: number; debitCards: string[] } {
   const bankRows = db.prepare(`
     SELECT t.id, t.date, t.description, t.charged_amount, t.bank_identifier FROM transactions t JOIN accounts a ON a.id = t.account_id
-    WHERE a.kind = 'bank' AND COALESCE(t.kind_source, 'auto') = 'auto' AND t.excluded = 0
+    WHERE a.kind = 'bank' AND COALESCE(t.kind_source, 'auto') = 'auto'
     ORDER BY t.date
   `).all() as { id: number; date: string; description: string; charged_amount: number; bank_identifier: string | null }[];
   const cards = db.prepare(`SELECT id, company FROM accounts WHERE kind = 'card'`).all() as { id: string; company: string }[];
   const cardRows = db.prepare(`
     SELECT t.id, t.account_id, t.date, t.charged_amount FROM transactions t JOIN accounts a ON a.id = t.account_id
-    WHERE a.kind = 'card' AND t.excluded = 0
+    WHERE a.kind = 'card'
   `).all() as { id: number; account_id: string; date: string; charged_amount: number }[];
 
   const used = new Set<number>();
@@ -82,7 +82,7 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
   const cards = db.prepare(`SELECT id, company FROM accounts WHERE kind = 'card'`).all() as { id: string; company: string }[];
   const cardRows = db.prepare(`
     SELECT account_id, COALESCE(processed_date, date) AS charge_date, charged_amount FROM transactions
-    WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'card') AND excluded = 0
+    WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'card')
   `).all() as { account_id: string; charge_date: string; charged_amount: number }[];
   const bills = db.prepare(`
     SELECT id, date, description, charged_amount FROM transactions

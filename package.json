@@ -16,7 +16,6 @@
     "server": "tsx watch src/server/index.ts",
     "web": "npm --prefix web run dev",
     "link": "tsx src/link.ts",
-    "migrate": "tsx src/db/migrate.ts",
     "pipeline": "tsx src/pipeline.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

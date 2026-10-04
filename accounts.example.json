@@ -25,22 +25,20 @@
     {
       "type": "ibkr",
       "token": "YOUR_FLEX_WEB_SERVICE_TOKEN",
-      "queryId": "YOUR_FLEX_QUERY_ID",
-      "ownerMemberId": 1
+      "queryId": "YOUR_FLEX_QUERY_ID"
     },
     {
       "type": "wallets",
       "apiKey": "YOUR_ALCHEMY_API_KEY",
       "networks": ["eth-mainnet", "arb-mainnet", "base-mainnet"],
-      "wallets": [{ "address": "0x0000000000000000000000000000000000000000", "label": "הארנק הראשי", "ownerMemberId": 1 }],
+      "wallets": [{ "address": "0x0000000000000000000000000000000000000000", "label": "Main wallet" }],
       "minUsd": 1
     },
     {
       "type": "exchange",
       "exchange": "binance",
       "apiKey": "YOUR_READ_ONLY_API_KEY",
-      "secret": "YOUR_READ_ONLY_API_SECRET",
-      "ownerMemberId": 1
+      "secret": "YOUR_READ_ONLY_API_SECRET"
     }
   ]
 }

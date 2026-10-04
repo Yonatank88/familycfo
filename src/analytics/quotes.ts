@@ -1,6 +1,6 @@
 import type { DB } from '../db/connection.js';
 import { today } from '../util.js';
-import { normalizeCurrency } from './fx.js';
+import { normalizeCurrency, saveMarketRate } from './fx.js';
 
 /**
  * Live market prices from Yahoo Finance's public chart endpoint (no key). Only symbols are sent —
@@ -56,6 +56,19 @@ export async function fetchQuote(symbol: string): Promise<Quote> {
   };
 }
 
+/** Daily closes from `from` (YYYY-MM-DD) until today, dated in the exchange's own time zone. */
+export async function fetchDailyCloses(symbol: string, from: string): Promise<{ date: string; close: number }[]> {
+  const period1 = Math.floor(Date.parse(`${from}T00:00:00Z`) / 1000);
+  const r = await chart(cleanSymbol(symbol), `period1=${period1}&period2=${Math.floor(Date.now() / 1000)}&interval=1d`);
+  const { factor } = majorUnits(r.meta?.currency);
+  const offset = Number(r.meta?.gmtoffset ?? 0);
+  const closes: (number | null)[] = r.indicators?.quote?.[0]?.close ?? [];
+  return ((r.timestamp ?? []) as number[])
+    .map((ts, i) => ({ date: new Date((ts + offset) * 1000).toISOString().slice(0, 10), close: closes[i] }))
+    .filter((p): p is { date: string; close: number } => typeof p.close === 'number')
+    .map(p => ({ date: p.date, close: p.close * factor }));
+}
+
 export function saveQuote(db: DB, q: Quote): void {
   db.prepare(`
     INSERT INTO quotes (symbol, name, currency, price, previous_close, exchange, instrument_type, market_time, fetched_at, error)
@@ -66,14 +79,6 @@ export function saveQuote(db: DB, q: Quote): void {
   `).run({ ...q, fetchedAt: new Date().toISOString() });
   db.prepare(`UPDATE holdings SET currency = ? WHERE symbol = ? AND manual_price IS NULL AND (currency IS NULL OR currency <> ?)`)
     .run(q.currency, q.symbol, q.currency);
-}
-
-/** A rate from Yahoo fills a day the Bank of Israel hasn't published (yet); it never replaces a BOI rate. */
-function saveMarketRate(db: DB, date: string, currency: string, rate: number): void {
-  db.prepare(`
-    INSERT INTO fx_rates (date, currency, rate_to_ils, source) VALUES (?, ?, ?, 'yahoo')
-    ON CONFLICT(date, currency) DO UPDATE SET rate_to_ils = excluded.rate_to_ils WHERE fx_rates.source = 'yahoo'
-  `).run(date, currency, rate);
 }
 
 const quotedSymbols = (db: DB) =>

@@ -1,4 +1,5 @@
 import type { SyncedAccount, SyncedPosition } from './holdings.js';
+import { baseCoin, coinAssetClass } from './assets.js';
 
 /**
  * Self-custody wallets (EVM) through Alchemy's Portfolio API: every token of each address on the configured
@@ -11,7 +12,7 @@ export interface WalletsSource {
   apiKey: string;
   /** Alchemy network ids; default eth-mainnet */
   networks?: string[];
-  wallets: { address: string; label?: string; ownerMemberId?: number }[];
+  wallets: { address: string; label?: string }[];
   /** tokens worth less than this (USD) are left out — airdropped spam, dust; default 1 */
   minUsd?: number;
 }
@@ -23,8 +24,11 @@ const NATIVE: Record<string, string> = {
   'avax-mainnet': 'AVAX',
 };
 
-/** Yahoo lists crypto as <SYMBOL>-USD; a symbol that isn't a plain ticker gets no quote. */
-export const cryptoYahooSymbol = (symbol: string) => (/^[A-Z0-9]{2,10}$/.test(symbol) ? `${symbol}-USD` : null);
+/** Yahoo lists crypto as <SYMBOL>-USD (bridged stablecoins as their base); a symbol that isn't a plain ticker gets no quote. */
+export const cryptoYahooSymbol = (symbol: string) => {
+  const coin = baseCoin(symbol);
+  return /^[A-Z0-9]{2,10}$/.test(coin) ? `${coin}-USD` : null;
+};
 
 const units = (balance: string | null | undefined, decimals: number) => {
   if (!balance) return 0;
@@ -68,10 +72,11 @@ export function walletPositions(tokens: any[], minUsd = 1): SyncedPosition[] {
   }
   return [...bySymbol.entries()]
     .filter(([, v]) => v.value >= minUsd)
-    .map(([symbol, v]) => ({ symbol, yahoo: cryptoYahooSymbol(symbol), name: v.name, quantity: v.quantity, currency: 'USD', price: v.value / v.quantity }));
+    .map(([symbol, v]) => ({ symbol, yahoo: cryptoYahooSymbol(symbol), name: v.name, quantity: v.quantity, currency: 'USD',
+      assetClass: coinAssetClass(symbol), price: v.value / v.quantity }));
 }
 
-export async function fetchWallets(cfg: WalletsSource): Promise<{ raw: unknown; accounts: SyncedAccount[] }> {
+export async function fetchWallets(cfg: WalletsSource): Promise<{ raw: unknown; accounts: SyncedAccount[]; asOf?: string | null }> {
   if (!cfg.apiKey) throw new Error('wallets: apiKey (Alchemy) is required');
   const id = cfg.id ?? 'wallets';
   const networks = cfg.networks?.length ? cfg.networks : ['eth-mainnet'];
@@ -81,8 +86,8 @@ export async function fetchWallets(cfg: WalletsSource): Promise<{ raw: unknown; 
     const address = w.address.trim().toLowerCase();
     const tokens = await tokensOf(cfg.apiKey, address, networks);
     raw[address] = tokens;
-    accounts.push({ source: `${id}:${address}`, broker: w.label ?? 'ארנק קריפטו', ownerMemberId: w.ownerMemberId ?? null,
+    accounts.push({ source: `${id}:${address}`, broker: w.label ?? 'Crypto wallet',
       positions: walletPositions(tokens, cfg.minUsd ?? 1) });
   }
-  return { raw, accounts };
+  return { raw, accounts, asOf: new Date().toISOString() };
 }

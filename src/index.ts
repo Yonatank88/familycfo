@@ -11,7 +11,7 @@ async function run(cfg: Config): Promise<void> {
   const db = getDb();
   const results = [...await scrapeAll(cfg, db), ...await syncInvestments(cfg.investments, db)];
   console.log(`\nScrape done: ${results.map(r => `${r.company} ${r.success ? '✓' : `✗ ${r.errorType}`}`).join(', ')}`);
-  const summary = await runPipeline(db);
+  const summary = await runPipeline(db, { sources: results.map(r => ({ source: r.company, kind: r.kind, success: r.success })) });
   console.log('Pipeline:', summary);
 }
 

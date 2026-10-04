@@ -1,5 +1,4 @@
 import type { DB } from './connection.js';
-import { BANK_COMPANIES, friendlyAccountName } from './migrations.js';
 import { dateKey, normalizeTransactions, type NormalizedTransaction, type ScrapedAccount } from '../ingest/normalize.js';
 
 export interface SaveResult {
@@ -9,8 +8,7 @@ export interface SaveResult {
 
 /**
  * Store one scraped account: upsert the account, record its balance and insert/update
- * its transactions. User-owned fields (category, member, tags, notes...) are
- * never overwritten here — only data that comes from the bank.
+ * its transactions. Derived fields (category, kind) are never overwritten here — only data that comes from the bank.
  */
 export function saveScrapedAccount(db: DB, companyId: string, account: ScrapedAccount): SaveResult & { accountId: string } {
   const accountId = `${companyId}:${account.accountNumber}`;
@@ -120,13 +118,34 @@ export function saveTransactions(db: DB, txns: NormalizedTransaction[]): SaveRes
   return { insertedIds, updated };
 }
 
-export function recordScrapeRun(db: DB, run: {
-  company: string; startedAt: string; success: boolean;
-  errorType?: string; errorMessage?: string; newTransactions?: number;
-}): void {
-  db.prepare(`
-    INSERT INTO scrape_runs (company, started_at, finished_at, success, error_type, error_message, new_transactions)
-    VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)
-  `).run(run.company, run.startedAt, run.success ? 1 : 0, run.errorType ?? null,
-    run.errorMessage ?? null, run.newTransactions ?? 0);
+/** One bank / investment source's outcome in a run. `asOf` = the source's own data time. */
+export function recordSourceRun(db: DB, run: { source: string; startedAt: string; ok: boolean; error?: string | null; asOf?: string | null }): void {
+  db.prepare(`INSERT INTO source_runs (source, started_at, ok, error, as_of) VALUES (?, ?, ?, ?, ?)`)
+    .run(run.source, run.startedAt, run.ok ? 1 : 0, run.error ?? null, run.asOf ?? null);
+}
+
+/** israeli-bank-scrapers company ids that are bank accounts (the rest are credit cards). */
+export const BANK_COMPANIES = new Set([
+  'hapoalim', 'leumi', 'discount', 'mercantile', 'mizrahi', 'otsarHahayal', 'union',
+  'beinleumi', 'massad', 'yahav', 'oneZero', 'pagi',
+]);
+
+/** Display names of the scraped companies and the investment sources. */
+export const SOURCE_NAMES: Record<string, string> = {
+  hapoalim: 'Hapoalim', leumi: 'Leumi', discount: 'Discount', mizrahi: 'Mizrahi Tefahot', mercantile: 'Mercantile',
+  otsarHahayal: 'Otsar Hahayal', union: 'Union', beinleumi: 'Beinleumi', massad: 'Massad', yahav: 'Yahav', oneZero: 'One Zero',
+  pagi: 'Pagi', visaCal: 'Cal', isracard: 'Isracard', amex: 'American Express', max: 'Max', beyahadBishvilha: 'Beyahad Bishvilha',
+  behatsdaa: 'Behatsdaa', ibkr: 'IBKR', binance: 'Binance', kraken: 'Kraken', wallets: 'Wallets',
+};
+
+/** "hapoalim:12-345-678901" → "Hapoalim ···8901" */
+export function friendlyAccountName(accountId: string): string {
+  const [company, number = ''] = accountId.split(':');
+  const name = SOURCE_NAMES[company] ?? company;
+  const deposit = number.match(/^(.*)-ID_(\d+)$/);
+  if (deposit) return `${name} savings ${deposit[2]} ···${deposit[1].replace(/\D/g, '').slice(-4)}`;
+  const fx = number.match(/^(.*)-([A-Z]{3})$/);
+  if (fx) return `${name} ${fx[2]}`;
+  const digits = number.replace(/\D/g, '');
+  return `${name} ···${digits.slice(-4) || number}`;
 }

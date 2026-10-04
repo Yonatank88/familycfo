@@ -1,6 +1,6 @@
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers';
 import { getDb, type DB } from './db/connection.js';
-import { saveScrapedAccount, recordScrapeRun } from './db/ingestRepo.js';
+import { saveScrapedAccount, recordSourceRun } from './db/ingestRepo.js';
 import { archiveRaw } from './ingest/archive.js';
 import type { InvestmentSource } from './sync/index.js';
 import * as readline from 'readline';
@@ -133,6 +133,8 @@ async function describePage(page: Page): Promise<string> {
 
 export interface ScrapeSummary {
   company: string;
+  /** a bank / card company, or an investment source (src/sync/) */
+  kind: 'bank' | 'investment';
   success: boolean;
   newTransactionIds: number[];
   errorType?: string;
@@ -248,9 +250,9 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
       if (!result.success) {
         console.error(`Failed to scrape ${account.companyId}:`, result.errorType, result.errorMessage);
         if (pageStateAtClose) console.error(pageStateAtClose);
-        recordScrapeRun(db, { company: account.companyId, startedAt, success: false,
-          errorType: result.errorType, errorMessage: result.errorMessage });
-        summaries.push({ company: account.companyId, success: false, newTransactionIds: [], errorType: result.errorType });
+        recordSourceRun(db, { source: account.companyId, startedAt, ok: false,
+          error: [result.errorType, result.errorMessage].filter(Boolean).join(': ') });
+        summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType: result.errorType });
         hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0,
           errorType: result.errorType, errorMessage: result.errorMessage });
         continue;
@@ -265,14 +267,13 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
         const label = acc.savingsAccount ? ' (savings deposit)' : '';
         console.log(`  ${saved.accountId}${label}: balance ${acc.balance ?? '-'} ${acc.currency ?? 'ILS'}, ${saved.insertedIds.length} new, ${saved.updated} updated`);
       }
-      recordScrapeRun(db, { company: account.companyId, startedAt, success: true, newTransactions: newIds.length });
-      summaries.push({ company: account.companyId, success: true, newTransactionIds: newIds });
+      recordSourceRun(db, { source: account.companyId, startedAt, ok: true, asOf: new Date().toISOString() });
+      summaries.push({ company: account.companyId, kind: 'bank', success: true, newTransactionIds: newIds });
       hooks.onProgress?.({ type: 'done', company: account.companyId, success: true, newTransactions: newIds.length });
     } catch (err) {
       console.error(`Error scraping ${account.companyId}:`, err);
-      recordScrapeRun(db, { company: account.companyId, startedAt, success: false,
-        errorType: 'EXCEPTION', errorMessage: String(err) });
-      summaries.push({ company: account.companyId, success: false, newTransactionIds: [], errorType: 'EXCEPTION' });
+      recordSourceRun(db, { source: account.companyId, startedAt, ok: false, error: String(err) });
+      summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType: 'EXCEPTION' });
       hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0,
         errorType: 'EXCEPTION', errorMessage: err instanceof Error ? err.message : String(err) });
     }

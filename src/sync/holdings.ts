@@ -1,11 +1,12 @@
 import type { DB } from '../db/connection.js';
 import { today } from '../util.js';
 import { fetchQuote, saveQuote, type Quote } from '../analytics/quotes.js';
+import type { AssetClass } from './assets.js';
 
 /**
- * Positions read from a broker, wallet or exchange (src/sync/*) → `holdings`, so they get live Yahoo prices, show on
- * /investments and count in net worth like the ones entered by hand. Each source owns its rows (`holdings.source`):
- * a re-sync updates the quantity and price, a position that is gone is archived, one that comes back is restored.
+ * Positions read from a broker, wallet or exchange (src/sync/*) → `holdings`, priced live from Yahoo when it can be.
+ * Each source owns its rows (`holdings.source`): a re-sync updates the quantity and price, a position that is gone is
+ * archived, one that comes back is restored.
  */
 export interface SyncedPosition {
   /** the source's own symbol — used when there's no Yahoo symbol */
@@ -14,20 +15,17 @@ export interface SyncedPosition {
   yahoo: string | null;
   name?: string | null;
   quantity: number;
-  /** currency of `price` and `costPrice`, major units */
+  /** currency of `price`, major units */
   currency: string;
+  assetClass: AssetClass;
   /** the source's own price per unit: the price when there's no quote, and a check that the quote is the same thing */
   price: number | null;
-  /** average cost per unit, when the source knows it (becomes the buy price) */
-  costPrice?: number | null;
 }
 
 export interface SyncedAccount {
   /** `${source id}:${account}` — e.g. ibkr:U1234567 */
   source: string;
-  /** shown as the broker; net worth has one item per broker + owner */
   broker: string;
-  ownerMemberId?: number | null;
   positions: SyncedPosition[];
 }
 
@@ -79,24 +77,21 @@ export async function syncHoldings(db: DB, sourceId: string, accounts: SyncedAcc
   }
 
   const find = db.prepare(`SELECT id FROM holdings WHERE source = ? AND symbol = ?`).pluck();
-  const insert = db.prepare(`INSERT INTO holdings (symbol, name, quantity, currency, buy_price, baseline_price, baseline_date,
-    manual_price, manual_price_date, broker, owner_member_id, source, synced_at)
-    VALUES (@symbol, @name, @quantity, @currency, @buyPrice, @baselinePrice, @day, @manualPrice, @manualDate, @broker, @owner, @source, @now)`);
-  // name, broker and owner are the user's to change; the sync owns what the source reports
-  const update = db.prepare(`UPDATE holdings SET quantity = @quantity, currency = @currency, buy_price = COALESCE(@buyPrice, buy_price),
-    manual_price = @manualPrice, manual_price_date = @manualDate, archived = 0, synced_at = @now, updated_at = CURRENT_TIMESTAMP
+  const insert = db.prepare(`INSERT INTO holdings (source, symbol, name, quantity, currency, asset_class, manual_price,
+    manual_price_date, broker, synced_at)
+    VALUES (@source, @symbol, @name, @quantity, @currency, @assetClass, @manualPrice, @manualDate, @broker, @now)`);
+  const update = db.prepare(`UPDATE holdings SET name = COALESCE(@name, name), quantity = @quantity, currency = @currency,
+    asset_class = @assetClass, manual_price = @manualPrice, manual_price_date = @manualDate, broker = @broker, archived = 0,
+    synced_at = @now, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id`);
   const seen: number[] = [];
 
   db.transaction(() => {
     for (const { account, p, symbol, price } of rows) {
       const values = {
-        symbol, name: p.name ?? null, quantity: p.quantity, currency: price.currency,
-        buyPrice: p.costPrice ?? null,
-        // no cost: the yield runs from today's price, like a holding added by hand
-        baselinePrice: p.costPrice == null ? price.price : null,
+        symbol, name: p.name ?? null, quantity: p.quantity, currency: price.currency, assetClass: p.assetClass,
         manualPrice: price.live ? null : price.price, manualDate: price.live ? null : day,
-        broker: account.broker, owner: account.ownerMemberId ?? null, source: account.source, now, day,
+        broker: account.broker, source: account.source, now,
       };
       if (!price.live) result.manual++;
       const id = find.get(account.source, symbol) as number | undefined;

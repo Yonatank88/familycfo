@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { SyncedAccount, SyncedPosition } from './holdings.js';
+import { ibkrAssetClass } from './assets.js';
 
 /**
  * Interactive Brokers through the Flex Web Service: open positions + cash of every account in a Flex Query.
@@ -14,7 +15,6 @@ export interface IbkrSource {
   queryId: string;
   /** broker name on the holdings; default "IBKR" */
   label?: string;
-  ownerMemberId?: number;
 }
 
 const BASE = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
@@ -46,6 +46,14 @@ async function flex(url: string): Promise<any> {
   return new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false }).parse(await res.text());
 }
 
+/** The statement's data date (the end of its period, e.g. the last business day) — YYYY-MM-DD. */
+export function flexAsOf(raw: any): string | null {
+  const dates = asArray(raw?.FlexQueryResponse?.FlexStatements?.FlexStatement)
+    .map((st: any) => String(st.toDate ?? '')).filter(d => /^\d{8}$/.test(d)).sort();
+  const d = dates.at(-1);
+  return d ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : null;
+}
+
 /** A parsed Flex statement → one account per IBKR account: its positions and its cash (one holding per currency). */
 export function parseFlexStatement(raw: any, cfg: IbkrSource): SyncedAccount[] {
   const id = cfg.id ?? 'ibkr';
@@ -55,12 +63,11 @@ export function parseFlexStatement(raw: any, cfg: IbkrSource): SyncedAccount[] {
     const positions: SyncedPosition[] = rows.filter((p: any) => p.assetCategory !== 'CASH').map((p: any) => {
       const quantity = Number(p.position);
       const value = num(p.positionValue);
-      const cost = num(p.costBasisMoney);
       return {
         symbol: String(p.symbol), yahoo: ibkrYahooSymbol(p), name: p.description ?? null, quantity, currency: p.currency,
+        assetClass: ibkrAssetClass(p.assetCategory),
         // per unit, multiplier included (an option's price is per share, its value per contract)
         price: value != null && quantity ? value / quantity : num(p.markPrice),
-        costPrice: cost != null && quantity ? cost / quantity : null,
       };
     });
     const cash = new Map<string, number>();
@@ -69,14 +76,14 @@ export function parseFlexStatement(raw: any, cfg: IbkrSource): SyncedAccount[] {
       cash.set(c.currency, Number(c.endingCash ?? 0));
     }
     for (const [currency, amount] of cash) {
-      if (amount) positions.push({ symbol: `CASH.${currency}`, yahoo: null, name: `מזומן ${currency}`, quantity: amount, currency, price: 1 });
+      if (amount) positions.push({ symbol: `CASH.${currency}`, yahoo: null, name: `Cash ${currency}`, quantity: amount, currency, assetClass: 'broker_cash', price: 1 });
     }
-    return { source: `${id}:${st.accountId}`, broker: cfg.label ?? 'IBKR', ownerMemberId: cfg.ownerMemberId ?? null, positions };
+    return { source: `${id}:${st.accountId}`, broker: cfg.label ?? 'IBKR', positions };
   });
 }
 
 /** Request the statement, then poll until IBKR has generated it (usually a few seconds). */
-export async function fetchIbkr(cfg: IbkrSource, opts: { pollMs?: number; attempts?: number } = {}): Promise<{ raw: unknown; accounts: SyncedAccount[] }> {
+export async function fetchIbkr(cfg: IbkrSource, opts: { pollMs?: number; attempts?: number } = {}): Promise<{ raw: unknown; accounts: SyncedAccount[]; asOf?: string | null }> {
   if (!cfg.token || !cfg.queryId) throw new Error('IBKR: token and queryId are required');
   const pollMs = opts.pollMs ?? 5000;
   const sent = (await flex(`${BASE}/SendRequest?t=${encodeURIComponent(cfg.token)}&q=${encodeURIComponent(cfg.queryId)}&v=3`))?.FlexStatementResponse;
@@ -85,7 +92,7 @@ export async function fetchIbkr(cfg: IbkrSource, opts: { pollMs?: number; attemp
   for (let attempt = 0; attempt < (opts.attempts ?? 12); attempt++) {
     if (pollMs) await new Promise(r => setTimeout(r, pollMs));
     const raw = await flex(`${BASE}/GetStatement?t=${encodeURIComponent(cfg.token)}&q=${sent.ReferenceCode}&v=3`);
-    if (raw?.FlexQueryResponse) return { raw, accounts: parseFlexStatement(raw, cfg) };
+    if (raw?.FlexQueryResponse) return { raw, accounts: parseFlexStatement(raw, cfg), asOf: flexAsOf(raw) };
     // 1019 = still generating; anything else is a real error
     const status = raw?.FlexStatementResponse;
     if (status?.ErrorCode && String(status.ErrorCode) !== '1019') throw new Error(`IBKR: ${status.ErrorCode} ${status.ErrorMessage ?? ''}`.trim());
