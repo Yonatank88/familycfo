@@ -98,16 +98,17 @@ describe('expenses by card', () => {
   addTx(db, { account: 'oneZero:1', date: '2026-05-02', description: 'ישראכרט', amount: -140, kind: 'card_payment' });
 
   it('one source per card plus Bank; card bills never count', () => {
-    const b = expenseBreakdown(db, '1Y', undefined, '2026-05-15');
-    expect(b.sources.map(s => [s.key, s.thisMonth, s.lastMonth])).toEqual([
+    const b = expenseBreakdown(db, '1Y', undefined, undefined, '2026-05-15');
+    expect(b.month).toBe('2026-05');
+    expect(b.sources.map(s => [s.key, s.spent, s.previous])).toEqual([
       ['isracard:1', 40, 100], ['max:2', 320, 0], ['bank', 250, 0],
     ]);
-    expect(b.months.find(m => m.month === '2026-05')?.total).toBe(610);
+    expect(b.bars.find(m => m.month === '2026-05')?.total).toBe(610);
     expect(expenseRowsIn(db, { source: 'bank' }, '2026-05-15').map(r => r.amount)).toEqual([250]);
   });
 
   it('next charge = the earliest processed date after today, everything charged on it', () => {
-    const b = expenseBreakdown(db, '1Y', undefined, '2026-05-15');
+    const b = expenseBreakdown(db, '1Y', undefined, undefined, '2026-05-15');
     expect(b.sources.find(s => s.key === 'max:2')?.nextCharge).toEqual({ date: '2026-06-02', amount: 300 });
     expect(nextCharge(db, 'isracard:1', '2026-05-15')).toEqual({ date: '2026-06-02', amount: 40 });
     expect(nextCharge(db, 'isracard:1', '2026-06-02')).toBeNull();
@@ -119,10 +120,28 @@ describe('expenses by card', () => {
   });
 
   it('filters by source; rows carry installment n/N and a cleaned merchant', () => {
-    const b = expenseBreakdown(db, '1Y', 'isracard:1', '2026-05-15');
+    const b = expenseBreakdown(db, '1Y', 'isracard:1', '2026-04', '2026-05-15');
     expect(b.total).toBe(140);
-    expect(b.merchants.map(m => m.name)).toEqual(['Shop', 'Cafe 12']);
+    expect(b.merchants.map(m => m.name)).toEqual(['Shop']); // the month's (April)
     const rows = expenseRowsIn(db, { source: 'max:2', month: '2026-05' }, '2026-05-15');
     expect(rows.map(r => [r.merchant, r.installment])).toEqual([['Books', null], ['IKEA', [1, 3]]]);
+  });
+
+  it('a selected month: each source\'s spend in it and the month before, every category with share and the previous month', () => {
+    const food = Number(db.prepare(`INSERT INTO categories (name) VALUES ('Food')`).run().lastInsertRowid);
+    db.prepare(`UPDATE transactions SET category_id = ? WHERE description IN ('Cafe 12', 'Shop')`).run(food);
+    const b = expenseBreakdown(db, '1Y', undefined, '2026-04', '2026-05-15');
+    expect(b.month).toBe('2026-04');
+    expect(b.months.slice(0, 3)).toEqual(['2026-05', '2026-04', '2026-03']);
+    expect(b.sources.map(s => [s.key, s.spent])).toEqual([['isracard:1', 100], ['max:2', 0], ['bank', 0]]);
+    expect(b.monthTotal).toBe(100);
+    expect(b.categories).toEqual([{ key: String(food), name: 'Food', total: 100, count: 1, share: 100, previous: 0 }]);
+    const may = expenseBreakdown(db, '1Y', undefined, '2026-05', '2026-05-15');
+    expect(may.categories.find(c => c.key === String(food))).toMatchObject({ total: 40, previous: 100 });
+    expect(may.categories.reduce((s, c) => s + c.share, 0)).toBeCloseTo(100, 0);
+    // a month after today falls back to this month
+    expect(expenseBreakdown(db, '1Y', undefined, '2026-09', '2026-05-15').month).toBe('2026-05');
+    db.prepare(`UPDATE transactions SET category_id = NULL`).run();
+    db.prepare(`DELETE FROM categories`).run();
   });
 });

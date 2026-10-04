@@ -105,11 +105,13 @@ app.get('/api/expenses/rows', async req => {
     from: q.month ? undefined : expenseBreakdown(db, rangeOf(q.range)).from });
 });
 
-// spend by source: each card account (this month, last month, next charge, installments left) and the bank accounts;
-// the range's months, categories and merchants, of one source when given
+// spend by source: each card account (the month's spend, the month before, next charge, installments left) and the bank
+// accounts; the range's monthly totals; the month's (month=YYYY-MM, default this month) categories and merchants; of one
+// source when given
 app.get('/api/expenses/breakdown', async req => {
   const q = req.query as Record<string, string>;
-  return expenseBreakdown(db, rangeOf(q.range), q.source || undefined);
+  if (q.month && !/^\d{4}-\d{2}$/.test(q.month)) throw badRequest('month must be YYYY-MM');
+  return expenseBreakdown(db, rangeOf(q.range), q.source || undefined, q.month || undefined);
 });
 
 // each fund (pension, study, provident, mutual) with its growth over the range and the returns its reports state

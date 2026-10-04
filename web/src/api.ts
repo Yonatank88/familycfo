@@ -55,18 +55,24 @@ export interface Ranked { key: string; name: string; total: number; count: numbe
 export interface ExpenseMonth { month: string; total: number; categories: Ranked[]; merchants: Ranked[] }
 export interface Expenses { currentMonth: string; months: ExpenseMonth[] }
 export interface ExpenseRow {
-  id: number; date: string; description: string; merchant: string; account: string; source: string; company: string;
+  id: number; date: string; description: string; merchant: string; merchantKey: string; account: string; source: string; company: string;
   category: string | null; amount: number; installment: [number, number] | null;
 }
 /** a card account (key = account id) or the bank accounts (key = 'bank') */
 export interface ExpenseSource {
-  key: string; kind: 'card' | 'bank'; company: string | null; label: string; thisMonth: number; lastMonth: number;
+  /** spent = the selected month, previous = the month before it */
+  key: string; kind: 'card' | 'bank'; company: string | null; label: string; spent: number; previous: number;
   nextCharge: { date: string; amount: number } | null;
   installments: { payments: number; plans: number; amount: number } | null;
 }
+export interface ExpenseCategory extends Ranked { share: number; previous: number }
 export interface ExpenseBreakdown {
-  range: Range; from: string; currentMonth: string; source: string | null; sources: ExpenseSource[]; total: number;
-  months: { month: string; total: number }[]; categories: Ranked[]; merchants: Ranked[];
+  range: Range; from: string; currentMonth: string; month: string; source: string | null;
+  /** months with spend, newest first */
+  months: string[]; sources: ExpenseSource[];
+  /** the range's total and monthly bars */
+  total: number; bars: { month: string; total: number }[];
+  monthTotal: number; categories: ExpenseCategory[]; merchants: Ranked[];
 }
 export interface ExpenseFilter { month?: string; range?: Range; source?: string; merchant?: string; category?: string }
 export interface Fund {
@@ -173,8 +179,8 @@ export const api = {
   summary: (range: Range) => request<Summary>(`/api/summary?range=${range}`),
   history: (range: Range, group: Group) => request<History>(`/api/history?range=${range}&group=${group}`),
   expenses: () => request<Expenses>('/api/expenses?months=12'),
-  expenseBreakdown: (range: Range, source?: string) =>
-    request<ExpenseBreakdown>(`/api/expenses/breakdown?range=${range}${source ? `&source=${encodeURIComponent(source)}` : ''}`),
+  expenseBreakdown: (range: Range, month: string | null, source?: string) =>
+    request<ExpenseBreakdown>(`/api/expenses/breakdown?range=${range}${month ? `&month=${month}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}`),
   expenseRows: (filter: ExpenseFilter) =>
     request<ExpenseRow[]>(`/api/expenses/rows?${new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][])}`),
   funds: (range: Range) => request<Funds>(`/api/funds?range=${range}`),

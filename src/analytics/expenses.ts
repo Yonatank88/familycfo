@@ -75,10 +75,30 @@ export function remainingInstallments(db: DB, accountId: string, asOf = today())
   return { payments, plans: count, amount: round(amount) };
 }
 
-export function expenseBreakdown(db: DB, range: Range, source?: string, asOf = today()) {
+/** The top merchants of some rows: grouped by `merchantKey`, named by their most common description. */
+function topMerchants(rows: ExpenseRow[], limit = 8) {
+  const merchants = new Map<string, { total: number; count: number; names: Map<string, number> }>();
+  for (const r of rows) {
+    const m = merchants.get(r.merchant) ?? { total: 0, count: 0, names: new Map() };
+    m.total += r.amount;
+    m.count++;
+    m.names.set(r.description, (m.names.get(r.description) ?? 0) + 1);
+    merchants.set(r.merchant, m);
+  }
+  return [...merchants].filter(([, m]) => m.total > 0).sort((a, b) => b[1].total - a[1].total).slice(0, limit).map(([key, m]) => ({
+    key, name: cleanMerchantName([...m.names].sort((a, b) => b[1] - a[1])[0][0]), total: round(m.total), count: m.count,
+  }));
+}
+
+/**
+ * The range's monthly totals (the overview), and one month (`month`, default this month): each source's spend in it and
+ * the month before, every category of it (share of the month, the previous month's total), its top merchants.
+ */
+export function expenseBreakdown(db: DB, range: Range, source?: string, month?: string, asOf = today()) {
   const all = expenseRows(db, asOf);
   const current = asOf.slice(0, 7);
-  const last = prevMonth(current);
+  const selected = month && month <= current ? month : current;
+  const previous = prevMonth(selected);
   const first = all.map(r => r.month).sort()[0] ?? current;
   const from = (range === 'All' ? first : [rangeStart(db, range, asOf).slice(0, 7), first].sort()[1]);
 
@@ -91,35 +111,34 @@ export function expenseBreakdown(db: DB, range: Range, source?: string, asOf = t
       const rows = of(c.id);
       return {
         key: c.id, kind: 'card' as const, company: c.company, label: c.label.replace(/\s*···\s*/, ' ••'),
-        thisMonth: sum(rows.filter(r => r.month === current)), lastMonth: sum(rows.filter(r => r.month === last)),
+        spent: sum(rows.filter(r => r.month === selected)), previous: sum(rows.filter(r => r.month === previous)),
         nextCharge: nextCharge(db, c.id, asOf), installments: remainingInstallments(db, c.id, asOf),
       };
     }),
     ...(hasBank ? [{
       key: BANK_SOURCE, kind: 'bank' as const, company: null, label: 'Bank',
-      thisMonth: sum(of(BANK_SOURCE).filter(r => r.month === current)), lastMonth: sum(of(BANK_SOURCE).filter(r => r.month === last)),
+      spent: sum(of(BANK_SOURCE).filter(r => r.month === selected)), previous: sum(of(BANK_SOURCE).filter(r => r.month === previous)),
       nextCharge: null, installments: null,
     }] : []),
   ];
 
-  const rows = (source ? of(source) : all).filter(r => r.month >= from);
-  const merchants = new Map<string, { total: number; count: number; names: Map<string, number> }>();
-  for (const r of rows) {
-    const m = merchants.get(r.merchant) ?? { total: 0, count: 0, names: new Map() };
-    m.total += r.amount;
-    m.count++;
-    m.names.set(r.description, (m.names.get(r.description) ?? 0) + 1);
-    merchants.set(r.merchant, m);
-  }
+  const mine = source ? of(source) : all;
+  const rows = mine.filter(r => r.month >= from);
+  const inMonth = mine.filter(r => r.month === selected);
+  const monthTotal = sum(inMonth);
+  const prevBy = new Map(byCategory(mine.filter(r => r.month === previous), Infinity).map(c => [c.key, c.total]));
   return {
-    range, from, currentMonth: current, source: source ?? null,
+    range, from, currentMonth: current, month: selected, source: source ?? null,
+    // every month with spend, newest first, and this month even without any
+    months: [...new Set([current, ...all.map(r => r.month)])].sort().reverse(),
     sources,
     total: sum(rows),
-    months: monthsBetween(from, current).map(month => ({ month, total: sum(rows.filter(r => r.month === month)) })),
-    categories: byCategory(rows, 8),
-    merchants: [...merchants].filter(([, m]) => m.total > 0).sort((a, b) => b[1].total - a[1].total).slice(0, 8).map(([key, m]) => ({
-      key, name: cleanMerchantName([...m.names].sort((a, b) => b[1] - a[1])[0][0]), total: round(m.total), count: m.count,
+    bars: monthsBetween(from, current).map(m => ({ month: m, total: sum(rows.filter(r => r.month === m)) })),
+    monthTotal,
+    categories: byCategory(inMonth, Infinity).map(c => ({
+      ...c, share: monthTotal > 0 ? round((c.total / monthTotal) * 100) : 0, previous: prevBy.get(c.key) ?? 0,
     })),
+    merchants: topMerchants(inMonth),
   };
 }
 
@@ -131,7 +150,7 @@ export function expenseRowsIn(db: DB, filter: { month?: string; from?: string; s
       && (!filter.merchant || r.merchant === filter.merchant) && (!filter.category || r.category.key === filter.category))
     .sort((a, b) => b.date.localeCompare(a.date) || b.amount - a.amount)
     .map(r => ({
-      id: r.id, date: r.date, description: r.description, merchant: cleanMerchantName(r.description), account: r.account,
+      id: r.id, date: r.date, description: r.description, merchant: cleanMerchantName(r.description), merchantKey: r.merchant, account: r.account,
       source: sourceOf(r), company: r.company, category: r.category.key === 'none' ? null : r.category.name, amount: r.amount, installment: r.installment,
     }));
 }

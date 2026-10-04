@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, Cell, XAxis } from 'recharts';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
-import { api, type ExpenseFilter, type ExpenseSource, type Range } from './api';
-import { money, monthLong, monthShort, shortDay, type Currency } from './format';
-import { SOURCE_OTHER, sourceColor } from './colors';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { api, type ExpenseCategory, type ExpenseFilter, type ExpenseSource, type Range } from './api';
+import { compact, money, monthLong, monthShort, shortDay, type Currency } from './format';
+import { OTHER, PALETTE, SOURCE_OTHER, sourceColor } from './colors';
 import { BarList, Card, Dot, Name, RangeToggle, SidePanel } from './ui';
 import { cn } from '@/lib/utils';
 
@@ -29,15 +31,15 @@ function SourcePills({ sources, value, onChange }: { sources: ExpenseSource[]; v
   );
 }
 
-/** One source: this month's spend, last month's, and for a card its next charge and the installments left. */
-function SourceCard({ s, active, onClick, fmt }: { s: ExpenseSource; active: boolean; onClick: () => void; fmt: (n: number) => string }) {
+/** One source: the month's spend, the month before's, and for a card its next charge and the installments left. */
+function SourceCard({ s, prev, active, onClick, fmt }: { s: ExpenseSource; prev: string; active: boolean; onClick: () => void; fmt: (n: number) => string }) {
   return (
     <button type="button" onClick={onClick} aria-pressed={active}
       className={cn('flex min-w-0 flex-col rounded-2xl border bg-surface px-5 py-4 text-left shadow-[0_1px_2px_rgba(20,33,61,0.04)] hover:bg-paper/60',
         active ? 'border-accent' : 'border-line')}>
       <span className="flex items-center gap-2 text-[13px] font-medium text-ink"><Dot color={colorOf(s)} /><Name text={s.label} /></span>
-      <span className="mt-2 text-[22px] font-semibold leading-tight tabular-nums text-ink">{fmt(s.thisMonth)}</span>
-      <span className="text-xs tabular-nums text-muted">Last month {fmt(s.lastMonth)}</span>
+      <span className="mt-2 text-[22px] font-semibold leading-tight tabular-nums text-ink">{fmt(s.spent)}</span>
+      <span className="text-xs tabular-nums text-muted">{monthShort(prev)} {fmt(s.previous)}</span>
       {s.kind === 'card' && (
         <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3 text-xs">
           <div>
@@ -57,14 +59,27 @@ function SourceCard({ s, active, onClick, fmt }: { s: ExpenseSource; active: boo
 }
 
 /** The rows behind a bar, a category or a merchant. */
-function RowsPanel({ filter, kicker, title, onClose, fmt }: {
-  filter: ExpenseFilter; kicker: string; title: string; onClose: () => void; fmt: (n: number) => string;
+function RowsPanel({ filter, kicker, title, onClose, fmt, byMerchant = false }: {
+  filter: ExpenseFilter; kicker: string; title: string; onClose: () => void; fmt: (n: number) => string; byMerchant?: boolean;
 }) {
   const { data } = useQuery({ queryKey: ['expense-rows', filter], queryFn: () => api.expenseRows(filter) });
   const total = data?.reduce((s, r) => s + r.amount, 0);
+  const merchants = new Map<string, { key: string; name: string; total: number }>();
+  if (byMerchant) for (const r of data ?? []) {
+    const m = merchants.get(r.merchantKey) ?? { key: r.merchantKey, name: r.merchant, total: 0 };
+    m.total += r.amount;
+    merchants.set(r.merchantKey, m);
+  }
+  const ranked = [...merchants.values()].filter(m => m.total > 0).sort((a, b) => b.total - a.total);
   return (
     <SidePanel onClose={onClose} kicker={kicker} title={<bdi dir="auto">{title}</bdi>} wide
       meta={total != null && <span className="tabular-nums">{fmt(total)}</span>}>
+      {ranked.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-line bg-surface px-4 py-3">
+          <h3 className="mb-1 text-[11px] font-medium uppercase tracking-wide text-faint">Merchants</h3>
+          <BarList items={ranked} format={fmt} />
+        </div>
+      )}
       <div className="rounded-2xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
@@ -99,26 +114,106 @@ function RowsPanel({ filter, kicker, title, onClose, fmt }: {
   );
 }
 
-type Panel = { filter: ExpenseFilter; kicker: string; title: string };
+/** Every category of the month: amount, share of the month, a thin bar, and the change from the month before. */
+function CategoryList({ items, format, delta, onSelect }: {
+  items: ExpenseCategory[]; format: (n: number) => string; delta: (n: number) => string; onSelect: (c: ExpenseCategory) => void;
+}) {
+  const top = items[0]?.total || 1;
+  return (
+    <ol className="space-y-0.5 text-sm">
+      {items.map((c, i) => {
+        const diff = c.total - c.previous;
+        return (
+          <li key={c.key}>
+            <button type="button" onClick={() => onSelect(c)}
+              className="-mx-2 flex min-h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-paper">
+              <span className="min-w-0 flex-1 truncate text-ink"><bdi dir="auto">{c.name}</bdi></span>
+              <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-line max-sm:hidden lg:w-20 xl:w-24">
+                <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (c.total / top) * 100)}%`, background: c.key === 'none' ? OTHER : PALETTE[i % PALETTE.length] }} />
+              </span>
+              <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted">{Math.round(c.share)}%</span>
+              <span className={cn('w-16 shrink-0 text-right text-xs tabular-nums', Math.abs(diff) < 1 ? 'text-faint' : diff > 0 ? 'text-down' : 'text-up')}>
+                {Math.abs(diff) < 1 ? '–' : `${diff > 0 ? '▲' : '▼'} ${delta(Math.abs(diff))}`}
+              </span>
+              <span className="w-20 shrink-0 text-right tabular-nums text-ink">{format(c.total)}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Previous / next month with spend, and a dropdown of every such month. */
+function MonthPicker({ months, value, onChange }: { months: string[]; value: string; onChange: (m: string) => void }) {
+  const i = months.indexOf(value);
+  const older = i >= 0 ? months[i + 1] : undefined;
+  const newer = i > 0 ? months[i - 1] : undefined;
+  const arrow = 'inline-flex size-9 items-center justify-center rounded-lg border border-line bg-surface text-muted hover:bg-paper hover:text-ink disabled:pointer-events-none disabled:opacity-40';
+  return (
+    <div className="flex items-center gap-1.5">
+      <button type="button" aria-label="Previous month" className={arrow} disabled={!older} onClick={() => older && onChange(older)}><ChevronLeft className="size-4" /></button>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger aria-label="Month" className="w-40 sm:w-44"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {months.map(m => <SelectItem key={m} value={m}>{monthLong(m)}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <button type="button" aria-label="Next month" className={arrow} disabled={!newer} onClick={() => newer && onChange(newer)}><ChevronRight className="size-4" /></button>
+    </div>
+  );
+}
+
+const MONTH = /^\d{4}-\d{2}$/;
+const monthFromUrl = () => {
+  const m = new URLSearchParams(window.location.search).get('month');
+  return m && MONTH.test(m) ? m : null;
+};
+const prevOf = (m: string) => {
+  const [y, mo] = m.split('-').map(Number);
+  return mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+};
+
+type Panel = { filter: ExpenseFilter; kicker: string; title: string; byMerchant?: boolean };
 
 export default function Expenses({ range, setRange, currency, convert }: {
   range: Range; setRange: (r: Range) => void; currency: Currency; convert: (n: number) => number;
 }) {
   const [source, setSource] = useState<string | null>(null);
+  const [month, setMonthState] = useState<string | null>(monthFromUrl);
   const [panel, setPanel] = useState<Panel | null>(null);
-  const { data } = useQuery({ queryKey: ['expense-breakdown', range, source], queryFn: () => api.expenseBreakdown(range, source ?? undefined), placeholderData: p => p });
+  useEffect(() => {
+    const onPop = () => setMonthState(monthFromUrl());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const setMonth = (m: string) => {
+    setMonthState(m);
+    window.history.replaceState(null, '', `${window.location.pathname}?month=${m}`);
+  };
+  const { data } = useQuery({
+    queryKey: ['expense-breakdown', range, month, source],
+    queryFn: () => api.expenseBreakdown(range, month, source ?? undefined), placeholderData: p => p,
+  });
   if (!data) return null;
   const fmt = (n: number) => money(convert(n), currency);
+  const delta = (n: number) => (convert(n) < 1000 ? fmt(n) : compact(convert(n), currency));
   const sourceLabel = data.sources.find(s => s.key === source)?.label ?? 'All';
-  const base: ExpenseFilter = source ? { source } : {};
-  const rangeKicker = `${sourceLabel} · ${monthShort(data.from)} – ${monthShort(data.currentMonth)}`;
-  const chart = data.months.map(m => ({ month: m.month, total: convert(m.total) }));
+  const selected = data.month;
+  const base: ExpenseFilter = { ...(source ? { source } : {}), month: selected };
+  const kicker = `${sourceLabel} · ${monthLong(selected)}`;
+  const chart = data.bars.map(m => ({ month: m.month, total: convert(m.total) }));
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <MonthPicker months={data.months} value={selected} onChange={setMonth} />
+        <div className="text-[22px] font-semibold leading-tight tabular-nums text-ink">{fmt(data.monthTotal)}</div>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {data.sources.map(s => (
-          <SourceCard key={s.key} s={s} fmt={fmt} active={source === s.key} onClick={() => setSource(source === s.key ? null : s.key)} />
+          <SourceCard key={s.key} s={s} prev={prevOf(selected)} fmt={fmt} active={source === s.key} onClick={() => setSource(source === s.key ? null : s.key)} />
         ))}
       </div>
 
@@ -129,7 +224,7 @@ export default function Expenses({ range, setRange, currency, convert }: {
           <BarChart data={chart} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
             onClick={(e: { activeLabel?: string | number } | null) => {
               const m = e?.activeLabel != null ? String(e.activeLabel) : null;
-              if (m) setPanel({ filter: { ...base, month: m }, kicker: sourceLabel, title: monthLong(m) });
+              if (m) setMonth(m);
             }}>
             <XAxis dataKey="month" tickFormatter={monthShort} tickLine={false} axisLine={false} fontSize={11} tick={{ fill: 'var(--color-faint)' }} minTickGap={6} />
             <ChartTooltip cursor={{ fill: 'rgba(22,33,62,0.04)' }}
@@ -140,23 +235,23 @@ export default function Expenses({ range, setRange, currency, convert }: {
                 </div>
               ) : null} />
             <Bar dataKey="total" radius={[5, 5, 5, 5]} maxBarSize={28} className="cursor-pointer" isAnimationActive={false}>
-              {chart.map(m => <Cell key={m.month} fill={m.month === data.currentMonth ? 'var(--color-accent)' : '#dfe4ee'} />)}
+              {chart.map(m => <Cell key={m.month} fill={m.month === selected ? 'var(--color-accent)' : '#dfe4ee'} />)}
             </Bar>
           </BarChart>
         </ChartContainer>
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card title="Top categories">
+        <Card title="Categories">
           {data.categories.length
-            ? <BarList items={data.categories} format={fmt}
-              onSelect={c => setPanel({ filter: { ...base, range, category: c.key }, kicker: rangeKicker, title: c.name })} />
+            ? <CategoryList items={data.categories} format={fmt} delta={delta}
+              onSelect={c => setPanel({ filter: { ...base, category: c.key }, kicker, title: c.name, byMerchant: true })} />
             : <p className="text-sm text-faint">None</p>}
         </Card>
         <Card title="Top merchants">
           {data.merchants.length
             ? <BarList items={data.merchants} format={fmt}
-              onSelect={m => setPanel({ filter: { ...base, range, merchant: m.key }, kicker: rangeKicker, title: m.name })} />
+              onSelect={m => setPanel({ filter: { ...base, merchant: m.key }, kicker, title: m.name })} />
             : <p className="text-sm text-faint">None</p>}
         </Card>
       </div>
