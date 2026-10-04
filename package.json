@@ -17,7 +17,7 @@
     "web": "npm --prefix web run dev",
     "link": "tsx src/link.ts",
     "pipeline": "tsx src/pipeline.ts",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
