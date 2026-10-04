@@ -24,5 +24,7 @@ if (schedule) {
     run(config).catch(console.error);
   });
 } else {
-  run(config).catch(err => { console.error(err); process.exitCode = 1; });
+  // exit when done: a failed bank can leave its browser (or an exchange client) holding the event loop open,
+  // and a scheduled run that never ends would block the next one
+  run(config).then(() => process.exit(0), err => { console.error(err); process.exit(1); });
 }

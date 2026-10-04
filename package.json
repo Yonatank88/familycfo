@@ -17,6 +17,8 @@
     "web": "npm --prefix web run dev",
     "link": "tsx src/link.ts",
     "pipeline": "tsx src/pipeline.ts",
+    "schedule:install": "scripts/schedule.sh install",
+    "schedule:uninstall": "scripts/schedule.sh uninstall",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
