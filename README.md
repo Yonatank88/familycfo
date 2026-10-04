@@ -16,7 +16,9 @@ type, expenses, all over time.
   - the investment sources you configure: Interactive Brokers (your Flex token), Alchemy (your wallet **addresses** only)
     and your exchanges (read-only API keys);
   - Bank of Israel exchange rates (nothing personal);
-  - Yahoo Finance quotes and FX rates — **only symbols**, never quantities or values.
+  - Yahoo Finance quotes and FX rates — **only symbols**, never quantities or values;
+  - reports you import (pension, study fund, statements) are read by Claude through **your own Claude login**
+    (`claude` CLI) — the report's content goes to Anthropic.
 
 ## Setup
 
@@ -69,6 +71,11 @@ Requirements: **Node.js 20+** and npm, macOS or Linux.
 - History starts where data starts: bank balances are backfilled from the bank's running balances (One Zero gives one
   year), investments from their first sync. A source that fails keeps its last snapshot.
 - Every scrape / sync result is kept untouched in `data/raw/<source>/<time>.json`.
+- **Reports** without an API — pension, study fund (קרן השתלמות), provident fund, statements (PDF, CSV, XLSX or an
+  image): **Add report** in the dashboard (or drop the file on the page), or `npm run import -- <file>`. Requires
+  [Claude Code](https://claude.com/claude-code) (`claude`, logged in). Each product becomes a holding valued at the
+  report's balance until a newer report; the same file again is ignored, a corrected edition replaces the earlier one.
+  When something doesn't add up, the report waits in **Reports** with questions.
 
 ## Configuration
 
