@@ -1,5 +1,11 @@
 import Fastify from 'fastify';
+import multipart from '@fastify/multipart';
+import { mkdtempSync, rmSync } from 'fs';
+import { writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { basename, join } from 'path';
 import { getDb } from '../db/connection.js';
+import { answerReport, deleteReport, failInterrupted, listReports, processReport, registerReport, reportDetail } from '../reports/index.js';
 import { scrapeState, startScrape, submitOtp } from './scrapeJob.js';
 import { RANGES, expenseRowsOf, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
 import { priceChangeSince } from '../analytics/quotes.js';
@@ -11,8 +17,15 @@ const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 4310);
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'warn' } });
+await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 1 } });
+failInterrupted(db);
 
 const badRequest = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
+const idOf = (params: unknown) => {
+  const id = Number((params as { id?: string }).id);
+  if (!Number.isInteger(id) || id < 1) throw badRequest('bad report id');
+  return id;
+};
 const rangeOf = (v: unknown): Range => {
   const r = String(v ?? '1Y');
   if (!RANGES.includes(r as Range)) throw badRequest(`range must be one of ${RANGES.join(', ')}`);
@@ -55,6 +68,34 @@ app.post('/api/scrape/otp', async req => {
   submitOtp(String((req.body as { code?: unknown })?.code ?? '').trim());
   return { ok: true };
 });
+
+// reports: the upload is read by Claude in the background; the list shows its progress
+app.post('/api/reports', async req => {
+  if (!req.isMultipart()) throw badRequest('send the report as multipart/form-data');
+  const part = await req.file();
+  if (!part) throw badRequest('no file');
+  const dir = mkdtempSync(join(tmpdir(), 'familycfo-upload-'));
+  try {
+    const name = basename(part.filename || 'report');
+    const path = join(dir, name);
+    await writeFile(path, await part.toBuffer());
+    const { report, duplicate } = registerReport(db, path, name);
+    if (!duplicate) processReport(db, report.id).catch(err => app.log.error(err));
+    return { id: report.id, status: report.status, duplicate };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+app.get('/api/reports', async () => listReports(db));
+app.get('/api/reports/:id', async (req, reply) => reportDetail(db, idOf(req.params)) ?? reply.code(404).send({ error: 'no such report' }));
+app.post('/api/reports/:id/answers', async req => {
+  const body = (req.body ?? {}) as { answers?: Record<string, unknown>; edits?: { asOf?: unknown; balances?: Record<string, unknown> } };
+  const answers = Object.fromEntries(Object.entries(body.answers ?? {}).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v));
+  const balances = Object.fromEntries(Object.entries(body.edits?.balances ?? {}).map(([k, v]) => [k, Number(v)]).filter(([, v]) => Number.isFinite(v)));
+  const r = await answerReport(db, idOf(req.params), answers, { asOf: body.edits?.asOf ? String(body.edits.asOf) : undefined, balances });
+  return { id: r.id, status: r.status };
+});
+app.delete('/api/reports/:id', async (req, reply) => (deleteReport(db, idOf(req.params)) ? { ok: true } : reply.code(404).send({ error: 'no such report' })));
 
 app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
   app.log.error(err);
