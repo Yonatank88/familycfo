@@ -1,6 +1,8 @@
 import type { SyncedAccount, SyncedPosition } from './holdings.js';
 import { cryptoYahooSymbol } from './wallets.js';
 import { FIAT, coinAssetClass, isStablecoin } from './assets.js';
+import { averageCost, type CoinEvent, type CostResult } from './history.js';
+import { fetchDailyCloses } from '../analytics/quotes.js';
 
 /**
  * Crypto exchange balances through ccxt (Binance, or any exchange ccxt supports — same config). Use a READ-ONLY API
@@ -21,11 +23,25 @@ export interface ExchangeSource {
   minUsd?: number;
 }
 
+/** A ccxt trade / ledger entry / deposit, the fields this reads. */
+export interface CcxtTrade {
+  id?: string; timestamp?: number; symbol?: string; side?: string; amount?: number; cost?: number; price?: number;
+  fee?: { cost?: number; currency?: string } | null;
+}
+export interface CcxtTransfer { id?: string; timestamp?: number; currency?: string; amount?: number; status?: string; type?: string;
+  direction?: string; info?: Record<string, unknown> }
+
 /** The part of a ccxt exchange this uses — tests pass a fake. */
 export interface ExchangeClient {
   name?: string;
+  id?: string;
   fetchBalance(): Promise<{ total: Record<string, number | undefined> } & Record<string, unknown>>;
   fetchTickers(symbols?: string[]): Promise<Record<string, { last?: number | null }>>;
+  loadMarkets?(): Promise<Record<string, unknown>>;
+  fetchMyTrades?(symbol?: string, since?: number, limit?: number, params?: Record<string, unknown>): Promise<CcxtTrade[]>;
+  fetchDeposits?(code?: string, since?: number, limit?: number, params?: Record<string, unknown>): Promise<CcxtTransfer[]>;
+  fetchWithdrawals?(code?: string, since?: number, limit?: number, params?: Record<string, unknown>): Promise<CcxtTransfer[]>;
+  fetchLedger?(code?: string, since?: number, limit?: number, params?: Record<string, unknown>): Promise<CcxtTransfer[]>;
 }
 
 async function ccxtClient(cfg: ExchangeSource): Promise<ExchangeClient> {
@@ -71,7 +87,219 @@ export function exchangePositions(total: Record<string, number | undefined>, tic
   return positions;
 }
 
-export async function fetchExchange(cfg: ExchangeSource, client?: ExchangeClient): Promise<{ raw: unknown; accounts: SyncedAccount[]; asOf?: string | null }> {
+// ---- trade history: when each held coin was opened and what it cost ------------------------------------------
+
+/** USD per unit of a currency on a day (fiat or coin); null when unknown. */
+export type UsdRate = (currency: string, day: string) => Promise<number | null>;
+
+/** USD rates from Yahoo daily closes (coins as <C>-USD, fiat as <C>USD=X), one request per currency. */
+export function yahooUsdRate(from = '2017-01-01'): UsdRate {
+  const cache = new Map<string, Promise<{ date: string; close: number }[]>>();
+  return async (currency, day) => {
+    const c = currency.toUpperCase();
+    if (c === 'USD') return 1;
+    const symbol = FIAT.has(c) ? `${c}USD=X` : `${c}-USD`;
+    if (!cache.has(symbol)) cache.set(symbol, fetchDailyCloses(symbol, from).catch(() => []));
+    const closes = await cache.get(symbol)!;
+    return closes.filter(x => x.date <= day).at(-1)?.close ?? closes[0]?.close ?? null;
+  };
+}
+
+const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const DAY = 86_400_000;
+/** Binance's deposit / withdrawal history is served in 90-day windows; it starts in 2017. */
+const BINANCE_START = Date.UTC(2017, 6, 1);
+const BINANCE_WINDOW = 90 * DAY;
+/** Quote markets whose trades build a coin's cost (the coin as base). */
+const COST_QUOTES = ['USDT', 'USD', 'BTC'];
+
+/** "permission denied", "invalid api-key, IP, or permissions" … → a short reason. */
+const reason = (err: unknown) => String((err as Error)?.message ?? err).replace(/\s+/g, ' ').slice(0, 160);
+
+/** A coin's events from its trades (it as base), deposits and withdrawals, costs converted to USD. */
+export async function coinEvents(coin: string, trades: CcxtTrade[], transfers: { at: number; type: 'in' | 'out'; quantity: number }[],
+  usd: UsdRate): Promise<CoinEvent[]> {
+  const events: CoinEvent[] = transfers.map(t => ({ at: t.at, type: t.type, quantity: t.quantity }));
+  for (const t of trades) {
+    const [base, quote] = String(t.symbol ?? '').split('/');
+    if (base !== coin || !quote || !t.timestamp || !(t.amount! > 0)) continue;
+    const day = dayOf(t.timestamp);
+    const feeInCoin = t.fee?.currency === coin ? t.fee.cost ?? 0 : 0;
+    if (t.side === 'sell') {
+      events.push({ at: t.timestamp, type: 'sell', quantity: t.amount! + feeInCoin });
+      continue;
+    }
+    const rate = await usd(quote, day);
+    let costUsd = rate == null || t.cost == null ? null : t.cost * rate;
+    if (costUsd != null && t.fee?.cost && t.fee.currency && t.fee.currency !== coin) {
+      const feeRate = await usd(t.fee.currency, day);
+      costUsd = feeRate == null ? costUsd : costUsd + t.fee.cost * feeRate;
+    }
+    events.push({ at: t.timestamp, type: 'buy', quantity: t.amount! - feeInCoin, costUsd });
+  }
+  return events;
+}
+
+/** Kraken's legacy asset codes ccxt leaves as they are when they carry a suffix (ZUSD.F). */
+const KRAKEN_LEGACY: Record<string, string> = {
+  ZUSD: 'USD', ZEUR: 'EUR', ZGBP: 'GBP', ZCAD: 'CAD', ZJPY: 'JPY', ZAUD: 'AUD', ZCHF: 'CHF', XXBT: 'BTC', XBT: 'BTC', XETH: 'ETH',
+  XXRP: 'XRP', XLTC: 'LTC', XXLM: 'XLM', XXMR: 'XMR', XZEC: 'ZEC', XETC: 'ETC', XREP: 'REP', XMLN: 'MLN', XXDG: 'DOGE', XDG: 'DOGE',
+};
+/** A Kraken ledger asset → the coin: earn / held balances (ETH.F, DOT.S, USD.HOLD) are the coin itself. */
+export const krakenCoin = (c: string) => {
+  const base = c.toUpperCase().replace(/\.(HOLD|[A-Z]{1,2})$/, '');
+  return KRAKEN_LEGACY[base] ?? base;
+};
+
+/**
+ * A coin's events from a Kraken-style ledger, where every movement is an entry and the legs of one trade share a
+ * reference id: a coin received in a trade / instant buy (receive) is a buy, its cost the other legs paid (fees
+ * included) in USD; a coin given in a trade / spend is a sell; deposits / withdrawals and futures-wallet transfers move
+ * it in / out at unknown cost; staking / earn rewards are units at zero cost; moves between spot and earn don't count.
+ */
+export async function ledgerEvents(coin: string, entries: CcxtTransfer[], usd: UsdRate): Promise<CoinEvent[]> {
+  const coinOf = krakenCoin;
+  const byRef = new Map<string, CcxtTransfer[]>();
+  for (const e of entries) {
+    const ref = String((e as { referenceId?: string }).referenceId ?? '');
+    if (ref) byRef.set(ref, [...(byRef.get(ref) ?? []), e]);
+  }
+  const fee = (e: CcxtTransfer) => Number((e as { fee?: { cost?: number } }).fee?.cost ?? 0) || 0;
+  const signed = (e: CcxtTransfer) => (e.direction === 'out' ? -1 : 1) * Math.abs(e.amount ?? 0) - fee(e);
+  const events: CoinEvent[] = [];
+  for (const e of entries) {
+    if (coinOf(String(e.currency ?? '')) !== coin || !e.timestamp) continue;
+    const change = signed(e);
+    if (!change) continue;
+    const type = String(e.info?.type ?? ''), subtype = String(e.info?.subtype ?? '');
+    const at = e.timestamp;
+    if (type === 'trade' || type === 'receive' || type === 'spend') {
+      if (change < 0) { events.push({ at, type: 'sell', quantity: -change }); continue; }
+      const legs = (byRef.get(String((e as { referenceId?: string }).referenceId ?? '')) ?? [])
+        .filter(l => coinOf(String(l.currency ?? '')) !== coin && signed(l) < 0);
+      let costUsd: number | null = legs.length ? 0 : null;
+      for (const l of legs) {
+        const rate = await usd(coinOf(String(l.currency)), dayOf(at));
+        costUsd = rate == null || costUsd == null ? null : costUsd + -signed(l) * rate;
+      }
+      events.push({ at, type: 'buy', quantity: change, costUsd });
+    } else if (type === 'deposit' || (type === 'transfer' && subtype === 'spotfromfutures')) {
+      if (change > 0) events.push({ at, type: 'in', quantity: change });
+    } else if (type === 'withdrawal' || (type === 'transfer' && subtype === 'spottofutures')) {
+      if (change < 0) events.push({ at, type: 'out', quantity: -change });
+    } else if ((type === 'staking' || (type === 'earn' && subtype === 'reward')) && change > 0) {
+      events.push({ at, type: 'buy', quantity: change, costUsd: 0 });
+    }
+  }
+  return events;
+}
+
+/** Every trade of a Binance market, oldest first (fromId pages of 1000). */
+async function binanceTrades(ex: ExchangeClient, symbol: string): Promise<CcxtTrade[]> {
+  const out: CcxtTrade[] = [];
+  for (let fromId = 0; ;) {
+    const page = await ex.fetchMyTrades!(symbol, undefined, 1000, { fromId });
+    out.push(...page);
+    if (page.length < 1000) return out;
+    fromId = Number(page.at(-1)!.id) + 1;
+  }
+}
+
+/** Every page of an offset-paged history (Kraken: 50 per page, newest first). */
+async function offsetPages<T>(fetchPage: (ofs: number) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = [];
+  for (let ofs = 0; ; ofs += 50) {
+    const page = await fetchPage(ofs);
+    out.push(...page);
+    if (page.length < 50 || ofs > 50_000) return out;
+  }
+}
+
+/** Binance deposits or withdrawals since 2017, window by window. */
+async function binanceWindows(fetch: (since: number) => Promise<CcxtTransfer[]>): Promise<CcxtTransfer[]> {
+  const out: CcxtTransfer[] = [];
+  for (let since = BINANCE_START; since < Date.now(); since += BINANCE_WINDOW) out.push(...await fetch(since));
+  return out;
+}
+
+export interface ExchangeHistory { costs: Map<string, CostResult>; raw: Record<string, unknown>; warnings: string[] }
+
+/**
+ * The held coins' opening dates and average costs from the exchange's own history (read-only endpoints): Binance —
+ * trades per held coin against the USDT / USD / BTC markets that exist, deposits and withdrawals; Kraken — all trades
+ * and the ledger's deposits / withdrawals. An endpoint that is refused leaves its part out and says why in `warnings`;
+ * a coin with no history gets neither (opening and gain show "—").
+ */
+export async function exchangeHistory(ex: ExchangeClient, exchange: string, held: Map<string, number>, usd: UsdRate = yahooUsdRate()): Promise<ExchangeHistory> {
+  const warnings: string[] = [];
+  const raw: Record<string, unknown> = {};
+  const coins = [...held.keys()];
+  const trades: CcxtTrade[] = [];
+  const transfers: CcxtTransfer[] = [];
+  let ledger: CcxtTransfer[] | null = null;
+  let fetched = 0;
+  const attempt = async (label: string, fn: () => Promise<void>) => {
+    try { await fn(); fetched++; } catch (err) { warnings.push(`${label}: ${reason(err)}`); }
+  };
+
+  if (!ex.fetchMyTrades) {
+    warnings.push('trade history: not supported');
+  } else if (exchange === 'binance') {
+    const markets = ex.loadMarkets ? await ex.loadMarkets().catch(() => ({} as Record<string, unknown>)) : {};
+    await attempt('trade history', async () => {
+      for (const coin of coins) {
+        for (const quote of COST_QUOTES) {
+          const symbol = `${coin}/${quote}`;
+          if (coin === quote || !(symbol in markets)) continue;
+          const list = await binanceTrades(ex, symbol);
+          raw[`trades:${symbol}`] = list.map(t => (t as { info?: unknown }).info ?? t);
+          trades.push(...list);
+        }
+      }
+    });
+  } else {
+    await attempt('trade history', async () => {
+      const list = await offsetPages(ofs => ex.fetchMyTrades!(undefined, undefined, undefined, { ofs }));
+      raw.trades = list.map(t => (t as { info?: unknown }).info ?? t);
+      trades.push(...list);
+    });
+  }
+
+  if (exchange === 'binance') {
+    if (ex.fetchDeposits) await attempt('deposit history', async () => {
+      const list = await binanceWindows(since => ex.fetchDeposits!(undefined, since, 1000));
+      raw.deposits = list.map(t => t.info ?? t);
+      transfers.push(...list.map(t => ({ ...t, direction: 'in' })));
+    });
+    if (ex.fetchWithdrawals) await attempt('withdrawal history', async () => {
+      const list = await binanceWindows(since => ex.fetchWithdrawals!(undefined, since, 1000));
+      raw.withdrawals = list.map(t => t.info ?? t);
+      transfers.push(...list.map(t => ({ ...t, direction: 'out' })));
+    });
+  } else if (ex.fetchLedger) {
+    await attempt('ledger', async () => {
+      const list = await offsetPages(ofs => ex.fetchLedger!(undefined, undefined, undefined, { ofs }));
+      raw.ledger = list.map(t => t.info ?? t);
+      ledger = list;
+    });
+  }
+
+  const ok = (t: CcxtTransfer) => !t.status || t.status === 'ok';
+  const costs = new Map<string, CostResult>();
+  // nothing could be read: leave what is stored
+  if (!fetched) return { costs, raw, warnings };
+  for (const coin of coins) {
+    // the ledger has every movement (both legs of a trade, instant buys, rewards); without it, trades + transfers
+    if (ledger) { costs.set(coin, averageCost(await ledgerEvents(coin, ledger, usd), held.get(coin)!)); continue; }
+    const moves = transfers.filter(t => coinOf(String(t.currency ?? '')) === coin && ok(t) && t.timestamp && t.amount)
+      .map(t => ({ at: t.timestamp!, type: (t.direction === 'out' ? 'out' : 'in') as 'in' | 'out', quantity: Math.abs(t.amount!) }));
+    const events = await coinEvents(coin, trades, moves, usd);
+    costs.set(coin, averageCost(events, held.get(coin)!));
+  }
+  return { costs, raw, warnings };
+}
+
+export async function fetchExchange(cfg: ExchangeSource, client?: ExchangeClient, opts: { usd?: UsdRate } = {}): Promise<{ raw: unknown; accounts: SyncedAccount[]; asOf?: string | null; history?: unknown; warnings?: string[] }> {
   if (!cfg.apiKey || !cfg.secret) throw new Error(`${cfg.exchange}: apiKey and secret are required`);
   const ex = client ?? await ccxtClient(cfg);
   const balance = await ex.fetchBalance();
@@ -89,10 +317,27 @@ export async function fetchExchange(cfg: ExchangeSource, client?: ExchangeClient
     }
   }
   const id = cfg.id ?? cfg.exchange;
+  const positions = exchangePositions(balance.total ?? {}, tickers, cfg.minUsd ?? 1);
+  // opening date and average cost of the coins kept (not fiat cash); a failure here never fails the sync
+  const held = new Map(positions.filter(p => p.assetClass !== 'broker_cash').map(p => [p.symbol, p.quantity]));
+  let history: ExchangeHistory | null = null;
+  const warnings: string[] = [];
+  if (held.size) {
+    try { history = await exchangeHistory(ex, cfg.exchange, held, opts.usd); warnings.push(...history.warnings); }
+    catch (err) { warnings.push(`history: ${reason(err)}`); }
+  }
+  for (const p of positions) {
+    const c = history?.costs.get(p.symbol);
+    if (!c) continue;
+    p.openedAt = c.openedAt;
+    p.costBasis = c.costBasis;
+    p.costSource = c.costSource;
+  }
   return {
     raw: { balance, tickers },
-    accounts: [{ source: `${id}:spot`, broker: cfg.label ?? ex.name ?? cfg.exchange,
-      positions: exchangePositions(balance.total ?? {}, tickers, cfg.minUsd ?? 1) }],
+    accounts: [{ source: `${id}:spot`, broker: cfg.label ?? ex.name ?? cfg.exchange, positions }],
     asOf: new Date().toISOString(),
+    history: history?.raw,
+    warnings,
   };
 }

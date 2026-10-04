@@ -134,6 +134,9 @@ describe('bank history backfill', () => {
   });
 });
 
+/** The baseline and every step after it. */
+const VERSIONS = [100, 101, 102, 103, 104];
+
 describe('database', () => {
   it('refuses a database with another schema', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-old-${process.pid}.db`;
@@ -148,7 +151,7 @@ describe('database', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-base-${process.pid}.db`;
     openDb(path).close();
     const db = new Database(path);
-    expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102, 103]);
+    expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual(VERSIONS);
     // back to the baseline: holdings with the old asset classes and no cost_basis, no reports
     db.exec(`DELETE FROM schema_version WHERE version > 100; DROP TABLE report_values; DROP TABLE reports; DROP TABLE holdings;
       CREATE TABLE holdings (id INTEGER PRIMARY KEY, source TEXT NOT NULL, symbol TEXT NOT NULL, name TEXT, quantity REAL NOT NULL, currency TEXT,
@@ -159,7 +162,7 @@ describe('database', () => {
         (3, 'ibkr:U1', 'VOO', 10, 'USD', 'stock', 0), (7, 'binance:spot', 'BTC-USD', 0.1, 'USD', 'crypto', 1)`);
     db.close();
     const reopened = openDb(path);
-    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102, 103]);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual(VERSIONS);
     expect(reopened.prepare(`SELECT id, source, symbol, quantity, asset_class, archived, cost_basis FROM holdings ORDER BY id`).all()).toEqual([
       { id: 3, source: 'ibkr:U1', symbol: 'VOO', quantity: 10, asset_class: 'stock', archived: 0, cost_basis: null },
       { id: 7, source: 'binance:spot', symbol: 'BTC-USD', quantity: 0.1, asset_class: 'crypto', archived: 1, cost_basis: null },
@@ -185,10 +188,28 @@ describe('database', () => {
     const before = db.prepare(`SELECT * FROM holdings ORDER BY id`).all();
     db.close();
     const reopened = openDb(path);
-    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102, 103]);
-    expect(reopened.prepare(`SELECT * FROM holdings ORDER BY id`).all()).toEqual(before);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual(VERSIONS);
+    // every row as it was; the later steps' columns empty
+    expect(reopened.prepare(`SELECT * FROM holdings ORDER BY id`).all()).toEqual(before.map(r => ({ ...(r as object), opened_at: null, cost_basis_source: null })));
     reopened.prepare(`INSERT INTO holdings (source, symbol, quantity, asset_class) VALUES ('report:y:5111111', 'Fund ••1111', 1, 'mutual_fund')`).run();
     expect(() => reopened.prepare(`INSERT INTO holdings (source, symbol, quantity, asset_class) VALUES ('x', 'y', 1, 'nope')`).run()).toThrow(/CHECK/);
+    reopened.close();
+    rmSync(path, { force: true });
+  });
+});
+
+describe('step 104', () => {
+  it('adds holdings.opened_at and cost_basis_source to a 103 database, keeping every row', () => {
+    const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-103-${process.pid}.db`;
+    openDb(path).close();
+    const db = new Database(path);
+    db.exec(`DELETE FROM schema_version WHERE version > 103; ALTER TABLE holdings DROP COLUMN opened_at; ALTER TABLE holdings DROP COLUMN cost_basis_source;
+      INSERT INTO holdings (id, source, symbol, quantity, currency, asset_class, cost_basis) VALUES (4, 'ibkr:U1', 'VOO', 10, 'USD', 'stock', 4000)`);
+    const before = db.prepare(`SELECT * FROM holdings ORDER BY id`).all();
+    db.close();
+    const reopened = openDb(path);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual(VERSIONS);
+    expect(reopened.prepare(`SELECT * FROM holdings ORDER BY id`).all()).toEqual(before.map(r => ({ ...(r as object), opened_at: null, cost_basis_source: null })));
     reopened.close();
     rmSync(path, { force: true });
   });

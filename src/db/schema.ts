@@ -102,6 +102,12 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     ALTER TABLE holdings_new RENAME TO holdings;
     CREATE INDEX idx_holdings_symbol ON holdings(symbol);
   ` },
+  { version: 104, name: 'holdings.opened_at', sql: `
+    -- when the current position was opened (IBKR openDateTime, the exchange's first buy / deposit, a wallet's first
+    -- inbound transfer), and where cost_basis came from: broker (IBKR) | trades (average cost of the exchange's trades)
+    ALTER TABLE holdings ADD COLUMN opened_at TEXT;
+    ALTER TABLE holdings ADD COLUMN cost_basis_source TEXT;
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 

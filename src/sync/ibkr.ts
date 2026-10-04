@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { SyncedAccount, SyncedPosition } from './holdings.js';
 import { ibkrAssetClass } from './assets.js';
+import { parseIbkrDate } from './history.js';
 
 /**
  * Interactive Brokers through the Flex Web Service: open positions + cash of every account in a Flex Query.
@@ -59,16 +60,20 @@ export function parseFlexStatement(raw: any, cfg: IbkrSource): SyncedAccount[] {
   const id = cfg.id ?? 'ibkr';
   return asArray(raw?.FlexQueryResponse?.FlexStatements?.FlexStatement).map((st: any): SyncedAccount => {
     // a query with lots lists each lot too; the summary row is the position
-    const rows = asArray(st.OpenPositions?.OpenPosition).filter((p: any) => !p.levelOfDetail || p.levelOfDetail === 'SUMMARY');
+    const all = asArray(st.OpenPositions?.OpenPosition) as any[];
+    const rows = all.filter((p: any) => !p.levelOfDetail || p.levelOfDetail === 'SUMMARY');
+    const lots = all.filter((p: any) => p.levelOfDetail === 'LOT');
     const positions: SyncedPosition[] = rows.filter((p: any) => p.assetCategory !== 'CASH').map((p: any) => {
       const quantity = Number(p.position);
       const value = num(p.positionValue);
+      const costBasis = num(p.costBasisMoney);
       return {
         symbol: String(p.symbol), yahoo: ibkrYahooSymbol(p), name: p.description ?? null, quantity, currency: p.currency,
         assetClass: ibkrAssetClass(p.assetCategory),
         // per unit, multiplier included (an option's price is per share, its value per contract)
         price: value != null && quantity ? value / quantity : num(p.markPrice),
-        costBasis: num(p.costBasisMoney),
+        costBasis, costSource: costBasis == null ? null : 'broker',
+        openedAt: ibkrOpenedAt(p, lots),
       };
     });
     const cash = new Map<string, number>();
@@ -81,6 +86,14 @@ export function parseFlexStatement(raw: any, cfg: IbkrSource): SyncedAccount[] {
     }
     return { source: `${id}:${st.accountId}`, broker: cfg.label ?? 'IBKR', positions };
   });
+}
+
+/** The summary row's openDateTime; without one, its earliest lot's (lots of the same contract). */
+export function ibkrOpenedAt(summary: any, lots: any[]): string | null {
+  const own = parseIbkrDate(summary.openDateTime);
+  if (own) return own;
+  const mine = lots.filter(l => (summary.conid ? l.conid === summary.conid : l.symbol === summary.symbol));
+  return mine.map(l => parseIbkrDate(l.openDateTime)).filter((d): d is string => !!d).sort()[0] ?? null;
 }
 
 /** Request the statement, then poll until IBKR has generated it (usually a few seconds). */

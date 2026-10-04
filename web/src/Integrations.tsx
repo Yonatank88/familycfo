@@ -74,7 +74,7 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
   const r = data.reports;
   const rows: Row[] = [
     ...data.sources.map(s => ({
-      key: s.key, label: s.label, type: KIND[s.kind], owner: s.owner, status: s.status, error: s.lastError,
+      key: s.key, label: s.label, type: KIND[s.kind], owner: s.owner, status: s.status, error: s.lastError ?? s.lastWarning,
       lastSuccessAt: s.lastSuccessAt, lastAttemptAt: s.lastAttemptAt, runs: s.runs, valueIls: s.valueIls,
       edit: () => onEdit(s.key), editLabel: 'Edit',
     })),

@@ -20,8 +20,13 @@ export interface SyncedPosition {
   assetClass: AssetClass;
   /** the source's own price per unit: the price when there's no quote, and a check that the quote is the same thing */
   price: number | null;
-  /** what the position cost in total, in `currency` — only sources that report it (IBKR) */
+  /** what the position cost in total, in `currency` (IBKR's cost basis, an exchange's average cost); undefined = not
+   * determined this run (the stored one stays), null = unknown */
   costBasis?: number | null;
+  /** where costBasis came from: broker | trades */
+  costSource?: 'broker' | 'trades' | null;
+  /** YYYY-MM-DD the position was opened; undefined = not determined this run (the stored one stays) */
+  openedAt?: string | null;
 }
 
 export interface SyncedAccount {
@@ -80,10 +85,14 @@ export async function syncHoldings(db: DB, sourceId: string, accounts: SyncedAcc
 
   const find = db.prepare(`SELECT id FROM holdings WHERE source = ? AND symbol = ?`).pluck();
   const insert = db.prepare(`INSERT INTO holdings (source, symbol, name, quantity, currency, asset_class, manual_price,
-    manual_price_date, broker, cost_basis, synced_at)
-    VALUES (@source, @symbol, @name, @quantity, @currency, @assetClass, @manualPrice, @manualDate, @broker, @costBasis, @now)`);
+    manual_price_date, broker, cost_basis, cost_basis_source, opened_at, synced_at)
+    VALUES (@source, @symbol, @name, @quantity, @currency, @assetClass, @manualPrice, @manualDate, @broker, @costBasis, @costSource, @openedAt, @now)`);
+  // cost and opening date not determined this run (undefined) keep what is stored
   const update = db.prepare(`UPDATE holdings SET name = COALESCE(@name, name), quantity = @quantity, currency = @currency,
-    asset_class = @assetClass, manual_price = @manualPrice, manual_price_date = @manualDate, broker = @broker, cost_basis = @costBasis, archived = 0,
+    asset_class = @assetClass, manual_price = @manualPrice, manual_price_date = @manualDate, broker = @broker,
+    cost_basis = CASE WHEN @keepCost THEN cost_basis ELSE @costBasis END,
+    cost_basis_source = CASE WHEN @keepCost THEN cost_basis_source ELSE @costSource END,
+    opened_at = CASE WHEN @keepOpened THEN opened_at ELSE @openedAt END, archived = 0,
     synced_at = @now, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id`);
   const seen: number[] = [];
@@ -94,11 +103,12 @@ export async function syncHoldings(db: DB, sourceId: string, accounts: SyncedAcc
         symbol, name: p.name ?? null, quantity: p.quantity, currency: price.currency, assetClass: p.assetClass,
         manualPrice: price.live ? null : price.price, manualDate: price.live ? null : day,
         broker: account.broker, source: account.source, costBasis: p.costBasis ?? null, now,
+        costSource: p.costBasis == null ? null : p.costSource ?? null, openedAt: p.openedAt ?? null,
       };
       if (!price.live) result.manual++;
       const id = find.get(account.source, symbol) as number | undefined;
       if (id != null) {
-        update.run({ ...values, id });
+        update.run({ ...values, id, keepCost: p.costBasis === undefined ? 1 : 0, keepOpened: p.openedAt === undefined ? 1 : 0 });
         seen.push(id);
         result.updated++;
       } else {

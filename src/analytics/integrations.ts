@@ -72,6 +72,8 @@ export function integrations(db: DB, sources: ConfiguredSource[], now = Date.now
       owner: src.owner ?? null,
       status: integrationStatus({ configured: src.configured, disabled: src.disabled, lastRunOk: last ? last.ok : null, lastSuccessAt }, now),
       lastSuccessAt, lastAttemptAt: last?.at ?? null, lastError: last && !last.ok ? last.error : null,
+      // what a successful run couldn't read (an exchange's trade history refused…)
+      lastWarning: last && last.ok ? last.error : null,
       accounts: stats.accounts, holdings: stats.holdings, valueIls: valueOf(source => source === src.id),
       runs: runs.reverse(),
     };

@@ -95,6 +95,8 @@ export interface Integration {
   /** first name */
   owner: string | null;
   lastSuccessAt: string | null; lastAttemptAt: string | null; lastError: string | null;
+  /** what the last (successful) run couldn't read, e.g. a refused trade history */
+  lastWarning: string | null;
   accounts: number; holdings: number | null; valueIls: number | null;
   /** the last 10, oldest first */
   runs: { at: string; ok: boolean; error: string | null }[];
