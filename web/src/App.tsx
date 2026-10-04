@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type Range } from './api';
 import type { Currency } from './format';
 import Dashboard from './Dashboard';
+import Integrations from './Integrations';
 import { Layout, PAGES, type Page } from './Layout';
 import { ReportPanel, useReports } from './reports';
 
@@ -32,8 +33,10 @@ export default function App() {
   return (
     <Layout page={page} navigate={navigate} summary={summary.data} currency={currency} setCurrency={setCurrency} convert={convert}>
       {summary.error && <p className="pb-4 text-sm text-down">{(summary.error as Error).message}</p>}
-      <Dashboard summary={summary.data} range={range} setRange={setRange} currency={currency} convert={convert}
-        reports={reports} onOpenReport={setOpenReport} />
+      {page === '/integrations'
+        ? <Integrations currency={currency} convert={convert} onOpenReport={setOpenReport} />
+        : <Dashboard summary={summary.data} range={range} setRange={setRange} currency={currency} convert={convert}
+          reports={reports} onOpenReport={setOpenReport} />}
       {openReport != null && <ReportPanel id={openReport} onClose={() => setOpenReport(null)} />}
     </Layout>
   );

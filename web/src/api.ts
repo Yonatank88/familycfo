@@ -53,6 +53,20 @@ export interface ReportDetail extends Omit<ReportItem, 'products' | 'questions'>
   questions: Question[]; answers: Record<string, string>;
 }
 
+export type IntegrationStatus = 'ok' | 'failed' | 'stale' | 'not_configured';
+export interface Integration {
+  id: string; label: string; kind: 'bank' | 'card' | 'investment'; status: IntegrationStatus;
+  lastSuccessAt: string | null; lastAttemptAt: string | null; lastError: string | null;
+  accounts: number; holdings: number | null; valueIls: number | null;
+  /** the last 10, oldest first */
+  runs: { at: string; ok: boolean; error: string | null }[];
+}
+export interface Integrations {
+  sources: Integration[];
+  reports: { imported: number; failed: number; latestAsOf: string | null; lastImportAt: string | null;
+    needsReview: { id: number; name: string | null }[]; products: number; valueIls: number | null };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   const body = await res.json().catch(() => null);
@@ -73,6 +87,7 @@ export const api = {
   scrape: () => request<ScrapeState>('/api/scrape'),
   startScrape: () => post<ScrapeState>('/api/scrape'),
   submitOtp: (code: string) => post<{ ok: true }>('/api/scrape/otp', { code }),
+  integrations: () => request<Integrations>('/api/integrations'),
   reports: () => request<ReportItem[]>('/api/reports'),
   report: (id: number) => request<ReportDetail>(`/api/reports/${id}`),
   uploadReport: (file: File) => {

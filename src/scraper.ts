@@ -1,6 +1,6 @@
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers';
 import { getDb, type DB } from './db/connection.js';
-import { saveScrapedAccount, recordSourceRun } from './db/ingestRepo.js';
+import { saveScrapedAccount, recordSourceRun, beginSourceRun } from './db/ingestRepo.js';
 import { archiveRaw } from './ingest/archive.js';
 import type { InvestmentSource } from './sync/index.js';
 import * as readline from 'readline';
@@ -155,6 +155,7 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
     console.log(`Scraping ${account.companyId}...`);
     hooks.onProgress?.({ type: 'start', company: account.companyId });
     const startedAt = new Date().toISOString();
+    beginSourceRun(db, account.companyId, startedAt);
     let pageStateAtClose: string | undefined;
 
     try {

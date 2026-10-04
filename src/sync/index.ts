@@ -1,5 +1,5 @@
 import type { DB } from '../db/connection.js';
-import { recordSourceRun } from '../db/ingestRepo.js';
+import { beginSourceRun, recordSourceRun } from '../db/ingestRepo.js';
 import { archiveRaw } from '../ingest/archive.js';
 import type { ScrapeHooks, ScrapeSummary } from '../scraper.js';
 import { syncHoldings, type SyncedAccount } from './holdings.js';
@@ -36,6 +36,7 @@ export async function syncInvestments(sources: InvestmentSource[] = [], db: DB, 
     console.log(`Syncing ${id}...`);
     hooks.onProgress?.({ type: 'start', company: id });
     const startedAt = new Date().toISOString();
+    beginSourceRun(db, id, startedAt);
     try {
       const { raw, accounts, asOf } = await fetchSource(source);
       archiveRaw(id, raw);

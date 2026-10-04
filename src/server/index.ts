@@ -9,6 +9,9 @@ import { answerReport, deleteReport, failInterrupted, listReports, processReport
 import { scrapeState, startScrape, submitOtp } from './scrapeJob.js';
 import { RANGES, expenseRowsOf, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
 import { priceChangeSince } from '../analytics/quotes.js';
+import { configuredSources, integrations } from '../analytics/integrations.js';
+// which sources are configured and whether their credentials are filled — the values never leave configuredSources
+import { loadConfig } from '../config.js';
 import { round } from '../util.js';
 
 const db = getDb();
@@ -59,6 +62,13 @@ app.get('/api/expenses/rows', async req => {
   const q = req.query as Record<string, string>;
   if (!/^\d{4}-\d{2}$/.test(q.month ?? '')) throw badRequest('month must be YYYY-MM');
   return expenseRowsOf(db, q.month, q.merchant || undefined);
+});
+
+// every input source's health from source_runs, what it brings, and the reports (read-only)
+app.get('/api/integrations', async () => {
+  let config = null;
+  try { config = loadConfig(); } catch { /* no accounts.json: every source is "not configured" */ }
+  return integrations(db, configuredSources(config));
 });
 
 // the scrape started from the UI: progress, and the bank's OTP request (the only writes)

@@ -36,3 +36,13 @@ export const monthShort = (m: string) => monthFmt.format(atNoon(`${m}-01`));
 export const monthLong = (m: string) => monthYearFmt.format(atNoon(`${m}-01`));
 /** A data time: date-only values as a date, timestamps with the time. */
 export const asOf = (iso: string | null) => (!iso ? '—' : iso.length <= 10 ? day(iso) : timeFmt.format(new Date(iso)));
+
+/** "5 min ago", "3 h ago", "2 d ago" — the exact time goes in a tooltip (asOf). */
+export const ago = (iso: string | null, now = Date.now()) => {
+  if (!iso) return '—';
+  const min = Math.round((now - Date.parse(iso)) / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  if (min < 48 * 60) return `${Math.round(min / 60)} h ago`;
+  return `${Math.round(min / 1440)} d ago`;
+};

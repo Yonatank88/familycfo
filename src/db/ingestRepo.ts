@@ -120,8 +120,40 @@ export function saveTransactions(db: DB, txns: NormalizedTransaction[]): SaveRes
 
 /** One bank / investment source's outcome in a run. `asOf` = the source's own data time. */
 export function recordSourceRun(db: DB, run: { source: string; startedAt: string; ok: boolean; error?: string | null; asOf?: string | null }): void {
+  inFlight.delete(`${run.source}|${run.startedAt}`);
   db.prepare(`INSERT INTO source_runs (source, started_at, ok, error, as_of) VALUES (?, ?, ?, ?, ?)`)
     .run(run.source, run.startedAt, run.ok ? 1 : 0, run.error ?? null, run.asOf ?? null);
+}
+
+/**
+ * Runs that started and have no outcome yet. A run cut short — the process exits or is stopped (Ctrl+C, a `tsx watch`
+ * restart during a dashboard refresh) — is recorded as failed instead of leaving no trace in source_runs.
+ */
+const inFlight = new Map<string, { db: DB; source: string; startedAt: string }>();
+let hooked = false;
+
+export function beginSourceRun(db: DB, source: string, startedAt: string): void {
+  inFlight.set(`${source}|${startedAt}`, { db, source, startedAt });
+  if (hooked) return;
+  hooked = true;
+  process.on('exit', () => recordInterruptedRuns('interrupted: the process exited mid-run'));
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.once(signal, () => {
+      recordInterruptedRuns(`interrupted (${signal})`);
+      process.kill(process.pid, signal); // the default behaviour, now that this listener is gone
+    });
+  }
+}
+
+/** Record every run still in flight as failed with `reason`. */
+export function recordInterruptedRuns(reason: string): void {
+  for (const run of [...inFlight.values()]) {
+    try {
+      recordSourceRun(run.db, { source: run.source, startedAt: run.startedAt, ok: false, error: reason });
+    } catch {
+      inFlight.delete(`${run.source}|${run.startedAt}`); // the database is already closed
+    }
+  }
 }
 
 /** israeli-bank-scrapers company ids that are bank accounts (the rest are credit cards). */

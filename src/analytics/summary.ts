@@ -13,7 +13,7 @@ export const TYPE_LABELS: Record<string, string> = {
   pension: 'Pension', study_fund: 'Study funds', provident_fund: 'Provident funds', deposit: 'Deposits', other: 'Other',
 };
 const INVESTMENT_BUCKETS = new Set(['stock', 'mutual_fund', 'crypto', 'stablecoin', 'broker_cash', 'pension', 'study_fund', 'provident_fund', 'deposit', 'other']);
-const STALE_MS = 36 * 3600_000;
+export const STALE_MS = 36 * 3600_000;
 
 export const sourceLabel = (source: string) => SOURCE_NAMES[source] ?? source;
 

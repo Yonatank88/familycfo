@@ -3,11 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api, type Account, type ScrapeState, type Summary } from './api';
 import { asOf, money, type Currency } from './format';
 import { AddReport } from './reports';
-import { ChevronDown, CloseIcon, LayoutIcon, LogoIcon, MenuIcon, Pills, RefreshIcon, button, primaryButton } from './ui';
+import { ChevronDown, CloseIcon, LayoutIcon, LogoIcon, MenuIcon, Pills, PlugIcon, RefreshIcon, button, primaryButton } from './ui';
 
-export type Page = '/';
+export type Page = '/' | '/integrations';
 export const PAGES: { path: Page; label: string; icon: typeof LayoutIcon }[] = [
   { path: '/', label: 'Dashboard', icon: LayoutIcon },
+  { path: '/integrations', label: 'Integrations', icon: PlugIcon },
 ];
 
 function useScrape() {
