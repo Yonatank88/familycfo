@@ -234,7 +234,18 @@ export async function loginViaPage(page: Page, company: IsracardGroupCompany, cr
         await page.waitForFunction(() => !/\/personalarea\/login/i.test(location.pathname), { timeout: 30_000 }).catch(() => {});
         return outcome;
       }
-      if (outcome.state === 'failed') return outcome;
+      if (outcome.state === 'failed') {
+        // A successful performLogonI navigates away at once, so its body can come back empty and read as a block.
+        // If the page then leaves the login page for the logged-in site, the login worked.
+        if (outcome.errorType === 'BLOCKED' && responses.some(r => r.call === 'performLogonI')) {
+          const loggedIn = await page.waitForFunction(
+            () => /isracard\.co\.il|americanexpress\.co\.il/i.test(location.hostname) && !/\/personalarea\/login/i.test(location.pathname),
+            { timeout: 15_000, polling: 500 },
+          ).then(() => true, () => false);
+          if (loggedIn) return { state: 'success' };
+        }
+        return outcome;
+      }
       // an OTP step can only come after the site accepted the ID, card and password
       const validated = responses.some(r => r.call === 'ValidateIdDataNoReg');
       if (validated && !otpHandled) {
