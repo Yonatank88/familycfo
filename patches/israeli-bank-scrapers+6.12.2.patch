@@ -429,10 +429,10 @@ index 0000000..5b3be4e
 +`,
 +};
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
-index 1bf8d21..d514ced 100644
+index 1bf8d21..eb78a0e 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
-@@ -15,6 +15,14 @@ var _oneZeroQueries = require("./one-zero-queries");
+@@ -15,6 +15,52 @@ var _oneZeroQueries = require("./one-zero-queries");
  function _interopRequireDefault(e) { return e && e.__esModule ? e : { default: e }; }
  const HEBREW_WORDS_REGEX = /[\u0590-\u05FF][\u0590-\u05FF"'\-_ /\\]*[\u0590-\u05FF]/g;
  const debug = (0, _debug.getDebug)('one-zero');
@@ -444,10 +444,48 @@ index 1bf8d21..d514ced 100644
 +    currentAccountBalance
 +  }
 +}`;
++// GetCustomer/portfolio list only the base-currency account; portfolioV3 also lists FOREIGN_FX accounts (found by introspection)
++const GET_PORTFOLIO_ACCOUNTS = `query GetPortfolioAccounts($portfolioId: String!) {
++  portfolioV3(portfolioId: $portfolioId) {
++    accounts {
++      accountId
++      accountType
++      closingDate
++      currency
++      status
++    }
++  }
++}`;
++const GET_SAVINGS_ACCOUNTS = `query GetSavingsAccounts($portfolioId: String!) {
++  savingsAccountsByPortfolio(portfolioId: $portfolioId) {
++    savingsAccounts {
++      savingsAccountId
++      savingsAccountInternalId
++      planName
++      savingsAmount {
++        amount
++        currency
++      }
++    }
++  }
++}`;
++// One Zero ids are JWTs whose payload `sub` is the stable entity id; anything else is used as is
++const stableId = id => {
++  const parts = String(id || '').split('.');
++  if (parts.length === 3) {
++    try {
++      const sub = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')).sub;
++      if (sub) return String(sub);
++    } catch (e) {
++      // not a JWT
++    }
++  }
++  return String(id || '');
++};
  const IDENTITY_SERVER_URL = 'https://identity.tfd-bank.com/v1/';
  const GRAPHQL_API_URL = 'https://mobile.tfd-bank.com/mobile-graph/graphql';
  class OneZeroScraper extends _baseScraper.BaseScraper {
-@@ -103,6 +111,21 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -103,6 +149,21 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
      };
    }
    async login(credentials) {
@@ -469,7 +507,7 @@ index 1bf8d21..d514ced 100644
      const otpTokenResult = await this.resolveOtpToken(credentials);
      if (!otpTokenResult.success) {
        return otpTokenResult;
-@@ -119,6 +142,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -119,6 +180,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
          idToken
        }
      } = getIdTokenResponse;
@@ -477,7 +515,7 @@ index 1bf8d21..d514ced 100644
      debug('Requesting session token');
      const getSessionTokenResponse = await (0, _fetch.fetchPost)(`${IDENTITY_SERVER_URL}/sessions/token`, {
        idToken,
-@@ -135,13 +159,38 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -135,13 +197,82 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
        persistentOtpToken: otpTokenResult.longTermTwoFactorAuthToken
      };
    }
@@ -490,7 +528,7 @@ index 1bf8d21..d514ced 100644
 +   * `${portfolioNum}-${currency}`.
 +   */
 +  async fetchPortfolioAccounts(portfolio, startDate) {
-+    const accounts = portfolio.accounts || [];
++    const accounts = await this.fetchAllAccounts(portfolio);
 +    const baseCurrency = portfolio.baseCurrency || 'ILS';
 +    const base = accounts.find(a => a.currency === baseCurrency) || accounts[0];
 +    const open = accounts.filter(a => a === base || !isClosedAccount(a));
@@ -509,7 +547,51 @@ index 1bf8d21..d514ced 100644
 +        debug(`Failed to fetch ${account.currency} account: ${e?.message}`);
 +      }
 +    }
++    result.push(...(await this.fetchSavingsAccounts(portfolio)));
 +    return result;
++  }
++  /** portfolio.accounts plus the accounts only portfolioV3 lists (foreign-currency); on failure, portfolio.accounts alone */
++  async fetchAllAccounts(portfolio) {
++    const known = portfolio.accounts || [];
++    try {
++      const {
++        portfolioV3
++      } = await (0, _fetch.fetchGraphql)(GRAPHQL_API_URL, GET_PORTFOLIO_ACCOUNTS, {
++        portfolioId: portfolio.portfolioId
++      }, {
++        authorization: `Bearer ${this.accessToken}`
++      });
++      const knownIds = new Set(known.map(a => stableId(a.accountId)));
++      const extra = (portfolioV3?.accounts || []).filter(a => a?.accountId && a.currency && !knownIds.has(stableId(a.accountId)));
++      return [...known, ...extra];
++    } catch (e) {
++      debug(`Failed to list portfolioV3 accounts: ${e?.message}`);
++      return known;
++    }
++  }
++  /** One Zero savings accounts / deposits: one balance-only account each, marked savingsAccount; on failure, none */
++  async fetchSavingsAccounts(portfolio) {
++    try {
++      const {
++        savingsAccountsByPortfolio
++      } = await (0, _fetch.fetchGraphql)(GRAPHQL_API_URL, GET_SAVINGS_ACCOUNTS, {
++        portfolioId: portfolio.portfolioId
++      }, {
++        authorization: `Bearer ${this.accessToken}`
++      });
++      const savings = (savingsAccountsByPortfolio?.savingsAccounts || []).filter(x => x?.savingsAccountId);
++      debug(`Portfolio has ${savings.length} savings accounts`);
++      return savings.map(x => ({
++        accountNumber: `${portfolio.portfolioNum}-SAV-${x.savingsAccountInternalId || stableId(x.savingsAccountId)}`,
++        currency: x.savingsAmount?.currency || portfolio.baseCurrency || 'ILS',
++        balance: Number.isFinite(x.savingsAmount?.amount) ? x.savingsAmount.amount : 0,
++        savingsAccount: true,
++        txns: []
++      }));
++    } catch (e) {
++      debug(`Failed to fetch savings accounts: ${e?.message}`);
++      return [];
++    }
 +  }
 +  async fetchPortfolioMovements(portfolio, account, accountNumber, startDate) {
      let cursor = null;
@@ -520,7 +602,7 @@ index 1bf8d21..d514ced 100644
        const {
          movements: {
            movements: newMovements,
-@@ -166,9 +215,28 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -166,9 +297,28 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
      }
      movements.sort((x, y) => new Date(x.movementTimestamp).valueOf() - new Date(y.movementTimestamp).valueOf());
      const matchingMovements = movements.filter(movement => new Date(movement.movementTimestamp) >= startDate);
@@ -551,7 +633,7 @@ index 1bf8d21..d514ced 100644
        txns: matchingMovements.map(movement => {
          const hasInstallments = movement.transaction?.enrichment?.recurrences?.some(x => x.isRecurrent);
          const modifier = movement.creditDebit === 'DEBIT' ? -1 : 1;
-@@ -235,7 +303,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -235,7 +385,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
      const portfolios = result.customer.flatMap(customer => customer.portfolios || []);
      return {
        success: true,
