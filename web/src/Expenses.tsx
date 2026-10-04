@@ -207,7 +207,10 @@ export default function Expenses({ range, setRange, currency, convert }: {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <MonthPicker months={data.months} value={selected} onChange={setMonth} />
+        <div className="flex flex-wrap items-center gap-3">
+          <MonthPicker months={data.months} value={selected} onChange={setMonth} />
+          <RangeToggle value={range} onChange={setRange} />
+        </div>
         <div className="text-[22px] font-semibold leading-tight tabular-nums text-ink">{fmt(data.monthTotal)}</div>
       </div>
 
@@ -217,7 +220,7 @@ export default function Expenses({ range, setRange, currency, convert }: {
         ))}
       </div>
 
-      <Card title="Spending" action={<RangeToggle value={range} onChange={setRange} />}>
+      <Card title="Spending">
         <SourcePills sources={data.sources} value={source} onChange={setSource} />
         <div className="mt-4 text-[28px] font-semibold leading-tight tracking-tight tabular-nums text-ink">{fmt(data.total)}</div>
         <ChartContainer config={spendConfig} className="-mx-1 mt-4 aspect-auto h-48" initialDimension={{ width: 720, height: 192 }}>
