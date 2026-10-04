@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, type Integration, type IntegrationStatus, type ReportItem } from './api';
 import { ago, asOf, money, type Currency } from './format';
-import { ReportList } from './reports';
+import { AddReportButton, ReportList } from './reports';
 import { sourceColor } from './colors';
 import { Dot, SidePanel, Tip } from './ui';
 
@@ -112,7 +112,10 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
                 <TableCell className="px-4 py-3">{x.runs ? <Runs runs={x.runs} /> : <span className="text-faint">—</span>}</TableCell>
                 <TableCell className="px-4 py-3 text-right tabular-nums text-ink">{value(x.valueIls)}</TableCell>
                 <TableCell className="px-4 py-3 pr-5 text-right">
-                  <button type="button" onClick={x.edit} className="min-h-9 rounded-lg px-2 text-[13px] font-medium text-muted hover:text-accent">{x.editLabel}</button>
+                  <span className="inline-flex items-center justify-end gap-1">
+                    {x.key === 'reports' && <AddReportButton />}
+                    <button type="button" onClick={x.edit} className="min-h-9 rounded-lg px-2 text-[13px] font-medium text-muted hover:text-accent">{x.editLabel}</button>
+                  </span>
                 </TableCell>
               </TableRow>
             ))}
@@ -123,8 +126,8 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
       {/* mobile: compact rows; tapping one opens its editor */}
       <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface md:hidden">
         {rows.map(x => (
-          <li key={x.key}>
-            <button type="button" onClick={x.edit} className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-paper">
+          <li key={x.key} className="flex items-center">
+            <button type="button" onClick={x.edit} className="flex min-h-14 min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left hover:bg-paper">
               <span aria-label={STATUS[x.status].label} className={`h-2 w-2 shrink-0 rounded-full ${STATUS[x.status].dot}`} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-ink"><bdi>{x.label}</bdi></span>
@@ -132,6 +135,7 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
               </span>
               <span className="shrink-0 text-sm tabular-nums text-ink">{value(x.valueIls)}</span>
             </button>
+            {x.key === 'reports' && <span className="pr-4"><AddReportButton iconOnly /></span>}
           </li>
         ))}
       </ul>

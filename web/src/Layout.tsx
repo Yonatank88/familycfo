@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { api, type ScrapeState, type Summary } from './api';
 import { asOf, type Currency } from './format';
-import { AddReport } from './reports';
+import { AddReportButton } from './reports';
 import { Segmented, button, primaryButton } from './ui';
 
 export type Page = '/' | '/bank' | '/bank/expenses' | '/investments' | '/funds' | '/integrations';
@@ -146,11 +146,13 @@ export function Layout({ page, navigate, summary, currency, setCurrency, toRevie
               <Segmented label="Currency" value={currency} onChange={setCurrency} disabled={v => v === 'USD' && !summary?.usdRate}
                 options={[{ value: 'ILS', label: '₪' }, { value: 'USD', label: '$' }]} />
               {page === '/integrations' && (
-                <button type="button" onClick={onAddIntegration} aria-label="Add integration" className={primaryButton}>
-                  <Plus className="size-3.5" /><span className="max-sm:hidden">Add integration</span>
-                </button>
+                <>
+                  <AddReportButton />
+                  <button type="button" onClick={onAddIntegration} aria-label="Add integration" className={primaryButton}>
+                    <Plus className="size-3.5" /><span className="max-sm:hidden">Add integration</span>
+                  </button>
+                </>
               )}
-              <AddReport />
               <button type="button" onClick={scrape.start} disabled={scrape.running} aria-label="Refresh" className={button}>
                 <RefreshCw className={`size-3.5 ${scrape.running ? 'animate-spin' : ''}`} /><span className="max-sm:hidden">Refresh</span>
               </button>

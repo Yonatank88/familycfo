@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ReportDetail, type ReportItem, type ReportStatus } from './api';
 import { Upload } from 'lucide-react';
@@ -22,8 +22,25 @@ export function StatusChip({ status }: { status: ReportStatus }) {
   return <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS[status].className}`}>{STATUS[status].label}</span>;
 }
 
-/** "Add report": the dialog from the top-bar button, and the same dialog as a drop target while a file is dragged over the page. */
-export function AddReport() {
+const AddReportContext = createContext<() => void>(() => {});
+/** Opens the "Add report" dialog. */
+export const useAddReport = () => useContext(AddReportContext);
+
+/** "Add report" button (Integrations top bar, the Reports row); `iconOnly` keeps just the icon at every width. */
+export function AddReportButton({ iconOnly = false }: { iconOnly?: boolean }) {
+  const open = useAddReport();
+  return (
+    <button type="button" onClick={open} aria-label="Add report" className={button}>
+      <Upload className="size-3.5" />{!iconOnly && <span className="max-sm:hidden">Add report</span>}
+    </button>
+  );
+}
+
+/**
+ * The "Add report" dialog, opened by `useAddReport` — and the same dialog as a drop target while a file is dragged over
+ * any page, so a report dropped anywhere is imported.
+ */
+export function ReportUpload({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -73,10 +90,8 @@ export function AddReport() {
   }
 
   return (
-    <>
-      <button type="button" onClick={() => { setError(null); setOpen(true); }} aria-label="Add report" className={button}>
-        <Upload className="size-3.5" /><span className="max-sm:hidden">Add report</span>
-      </button>
+    <AddReportContext.Provider value={() => { setError(null); setOpen(true); }}>
+      {children}
       <Dialog open={open || dragging} onOpenChange={o => { if (!o) { setOpen(false); setDragging(false); } }}>
         <DialogContent className="max-w-md gap-0 rounded-2xl border-line bg-surface p-0">
           <DialogTitle className="px-5 pt-5 text-[15px] font-semibold tracking-tight text-ink">Add report</DialogTitle>
@@ -92,7 +107,7 @@ export function AddReport() {
           <DialogDescription className="border-t border-line px-5 py-3 text-xs text-faint">Sent to Anthropic through your Claude login.</DialogDescription>
         </DialogContent>
       </Dialog>
-    </>
+    </AddReportContext.Provider>
   );
 }
 
