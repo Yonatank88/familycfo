@@ -5,7 +5,7 @@ const WORD_END = `(?=$|[\\s\\-–'"״׳])`;
 
 /** Bank-account rows that pay a credit-card bill (the purchases are already stored per card). */
 export const CARD_PAYMENT_PATTERN = new RegExp(
-  `^(ויזה|כאל|ישראכרט|מקס|לאומי קארד|לאומיקארד|לאומי מאסטרקרד|מאסטרקרד|אמריקן אקספרס|דיינרס|max|visa|isracard|cal)${WORD_END}`, 'i');
+  `^(ויזה|כאל|ישראכרט|מקס|לאומי קארד|לאומיקארד|לאומי מאסטרקרד|מאסטרקרד|מסטרקרד|אמריקן אקספרס|דיינרס|max|visa|isracard|cal)${WORD_END}`, 'i');
 
 /** Standing orders into savings plans / deposits. */
 export const SAVINGS_PATTERN = /לחיסכון|לחסכון|פיקדון|פקדון|קופת גמל|השקעה ב/;

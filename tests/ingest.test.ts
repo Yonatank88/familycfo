@@ -11,6 +11,7 @@ describe('kinds', () => {
     expect(kindFor(bank('משכורת', 10_000))).toBe('income');
     expect(kindFor({ description: 'זיכוי', charged_amount: 30, account_kind: 'card', category_kind: null })).toBe('refund');
     expect(kindFor(bank('ויזה', -2000))).toBe('card_payment');
+    expect(kindFor(bank('מסטרקרד', -900))).toBe('card_payment'); // Hapoalim's spelling
     expect(kindFor(bank('העברה לחיסכון', -500))).toBe('savings');
   });
 
