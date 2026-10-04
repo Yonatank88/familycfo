@@ -17,6 +17,7 @@ const STATEMENT_MIN = 1000;
 const DAY = 86_400_000;
 
 const DEBIT_MAX_LAG_DAYS = 5;
+const isAuto = (source: string | null) => (source ?? 'auto') === 'auto';
 
 /**
  * Debit cards (e.g. Hapoalim's Isracard-issued Visa) charge every purchase to the bank a day
@@ -80,13 +81,18 @@ export function matchImmediateCardDebits(db: DB): { matched: number; debitCards:
  * its charges within ±4 days add up to the bill (3% tolerance), or it is statement-sized and
  * that card company is scraped (older rows lack charge dates). Otherwise it's real spend — e.g.
  * Hapoalim's small daily "ויזה" rows are debit-card purchases with no card account behind them.
+ *
+ * A statement-sized bill on a card's first charge day that no charges explain stays an expense (it pays for purchases
+ * from before the card data starts) — and the card's rows charged within ±4 days of it are part of that bill, so they
+ * become `card_covered` (never spend) and the bill counts once. `deriveKinds` resets them on every run, so once the bill
+ * is matched they are spend again.
  */
-export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
+export function reconcileCardBills(db: DB): { kept: number; demoted: number; covered: number } {
   const cards = db.prepare(`SELECT id, company FROM accounts WHERE kind = 'card'`).all() as { id: string; company: string }[];
   const cardRows = db.prepare(`
-    SELECT account_id, COALESCE(processed_date, date) AS charge_date, charged_amount FROM transactions
+    SELECT id, account_id, COALESCE(processed_date, date) AS charge_date, charged_amount, kind, kind_source FROM transactions
     WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'card')
-  `).all() as { account_id: string; charge_date: string; charged_amount: number }[];
+  `).all() as { id: number; account_id: string; charge_date: string; charged_amount: number; kind: string | null; kind_source: string | null }[];
   const bills = db.prepare(`
     SELECT id, date, description, charged_amount FROM transactions
     WHERE kind = 'card_payment' AND COALESCE(kind_source, 'auto') = 'auto'
@@ -101,7 +107,9 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
     else { range.from = Math.min(range.from, day); range.to = Math.max(range.to, day); }
   }
   const demote = db.prepare(`UPDATE transactions SET kind = 'expense', kind_source = 'auto' WHERE id = ?`);
+  const cover = db.prepare(`UPDATE transactions SET kind = 'card_covered', kind_source = 'auto' WHERE id = ?`);
   let kept = 0, demoted = 0;
+  const coveredRows = new Set<number>();
 
   // card day-batches: what each card charged per charge day
   const batches = new Map<string, { day: number; sum: number }[]>();
@@ -152,11 +160,25 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
         // strictly after the first charge day: a bill on it pays for purchases from before the data starts
         return !!range && day > range.from + 5 * DAY && day <= range.to + 5 * DAY;
       });
-      if (matched.has(bill.id) || (amount >= STATEMENT_MIN && covered)) kept++;
-      else { demote.run(bill.id); demoted++; }
+      if (matched.has(bill.id) || (amount >= STATEMENT_MIN && covered)) { kept++; continue; }
+      demote.run(bill.id);
+      demoted++;
+      if (amount < STATEMENT_MIN) continue;
+      // a bill on the card's first charge day: that day's card rows are inside it
+      for (const card of candidates) {
+        const range = coverage.get(card.id);
+        if (!range || Math.abs(day - range.from) > 5 * DAY) continue;
+        for (const r of cardRows) {
+          if (r.account_id !== card.id || !near(Date.parse(localDate(r.charge_date)), day)) continue;
+          if (isAuto(r.kind_source) && (r.kind === 'expense' || r.kind === 'refund') && !coveredRows.has(r.id)) {
+            cover.run(r.id);
+            coveredRows.add(r.id);
+          }
+        }
+      }
     }
   })();
-  return { kept, demoted };
+  return { kept, demoted, covered: coveredRows.size };
 }
 
 interface Row {

@@ -55,7 +55,7 @@ export async function runPipeline(db: DB = getDb(), opts: PipelineOptions = {}):
   const snapshots = writeSnapshots(db, opts.sources ?? []);
   const accountDays = seedAccountBalances(db);
   return {
-    categorized, merchantRows, cardBillsKept: cardBills.kept, cardBillsDemoted: cardBills.demoted, immediateDebits: debits.matched, transfers, fxExchanges,
+    categorized, merchantRows, cardBillsKept: cardBills.kept, cardBillsDemoted: cardBills.demoted, cardRowsCovered: cardBills.covered, immediateDebits: debits.matched, transfers, fxExchanges,
     snapshots: snapshots.written, bankDaysBackfilled: snapshots.backfilled, accountDaysSeeded: accountDays, fxFlagged: snapshots.flagged.length,
   };
 }

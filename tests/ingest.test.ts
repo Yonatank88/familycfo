@@ -48,7 +48,7 @@ describe('card bills', () => {
     addTx(db, { account: 'isracard:1234', date: '2026-04-09', processedDate: '2026-05-02', description: 'B', amount: -200 });
     const bill = addTx(db, { account: 'hapoalim:1', date: '2026-05-02', description: 'ישראכרט', amount: -500, kind: 'card_payment' });
     const stray = addTx(db, { account: 'hapoalim:1', date: '2026-05-20', description: 'מקס', amount: -40, kind: 'card_payment' });
-    expect(reconcileCardBills(db)).toEqual({ kept: 1, demoted: 1 });
+    expect(reconcileCardBills(db)).toMatchObject({ kept: 1, demoted: 1 });
     expect(kindOf(db, bill)).toBe('card_payment');
     expect(kindOf(db, stray)).toBe('expense');
   });
@@ -81,6 +81,47 @@ describe('card bills', () => {
     reconcileCardBills(db);
     expect(kindOf(db, old)).toBe('expense');
     expect(kindOf(db, inRange)).toBe('card_payment');
+  });
+
+  it('a bill on the card\'s first charge day counts once: the card rows charged with it are covered by it', () => {
+    const db = testDb();
+    addAccount(db, 'onezero:1', 'bank');
+    addAccount(db, 'isracard:1234', 'card');
+    // the first charge day: only part of what the bill pays for was scraped
+    const first = addTx(db, { account: 'isracard:1234', date: '2026-06-20', processedDate: '2026-07-02', description: 'A', amount: -300, kind: 'expense' });
+    const refund = addTx(db, { account: 'isracard:1234', date: '2026-06-21', processedDate: '2026-07-02', description: 'R', amount: 20, kind: 'refund' });
+    const manual = addTx(db, { account: 'isracard:1234', date: '2026-06-22', processedDate: '2026-07-02', description: 'M', amount: -50, kind: 'expense' });
+    db.prepare(`UPDATE transactions SET kind_source = 'manual' WHERE id = ?`).run(manual);
+    const later = addTx(db, { account: 'isracard:1234', date: '2026-07-10', processedDate: '2026-08-02', description: 'B', amount: -900, kind: 'expense' });
+    const bill = addTx(db, { account: 'onezero:1', date: '2026-07-02', description: 'חיוב מ-ישראכרט בע"מ', amount: -4000, kind: 'card_payment' });
+    expect(reconcileCardBills(db)).toMatchObject({ demoted: 1, covered: 2 });
+    expect(kindOf(db, bill)).toBe('expense');
+    expect([kindOf(db, first), kindOf(db, refund)]).toEqual(['card_covered', 'card_covered']);
+    expect(kindOf(db, manual)).toBe('expense'); // a kind set by hand is never touched
+    expect(kindOf(db, later)).toBe('expense');
+    // the next pipeline run (kinds reset, then card bills) lands in the same place
+    deriveKinds(db, 'all');
+    expect(reconcileCardBills(db)).toMatchObject({ demoted: 1, covered: 2 });
+    expect(kindOf(db, first)).toBe('card_covered');
+  });
+
+  it('once more history explains the first-day bill, the rows it covered are spend again', () => {
+    const db = testDb();
+    addAccount(db, 'onezero:1', 'bank');
+    addAccount(db, 'isracard:1234', 'card');
+    const first = addTx(db, { account: 'isracard:1234', date: '2026-06-20', processedDate: '2026-07-02', description: 'A', amount: -3000, kind: 'expense' });
+    const refund = addTx(db, { account: 'isracard:1234', date: '2026-06-21', processedDate: '2026-07-02', description: 'R', amount: 20, kind: 'refund' });
+    addTx(db, { account: 'isracard:1234', date: '2026-07-10', processedDate: '2026-08-02', description: 'B', amount: -900, kind: 'expense' });
+    const bill = addTx(db, { account: 'onezero:1', date: '2026-07-02', description: 'חיוב מ-ישראכרט בע"מ', amount: -4000, kind: 'card_payment' });
+    reconcileCardBills(db);
+    expect(kindOf(db, first)).toBe('card_covered');
+    // an older scrape fills in the rest of that charge day, and an earlier one
+    addTx(db, { account: 'isracard:1234', date: '2026-06-15', processedDate: '2026-07-02', description: 'C', amount: -1020, kind: 'expense' });
+    addTx(db, { account: 'isracard:1234', date: '2026-05-15', processedDate: '2026-06-02', description: 'D', amount: -100, kind: 'expense' });
+    deriveKinds(db, 'all');
+    expect(reconcileCardBills(db)).toMatchObject({ covered: 0 });
+    expect(kindOf(db, bill)).toBe('card_payment');
+    expect([kindOf(db, first), kindOf(db, refund)]).toEqual(['expense', 'refund']);
   });
 
   it('pairs a debit card charge with its purchase, one to one', () => {

@@ -95,7 +95,7 @@ describe('bills of cards that are not scraped', () => {
     addAccount(db, 'visaCal:1', 'card');
     addTx(db, { account: 'visaCal:1', date: '2026-07-20', processedDate: '2026-08-10', description: 'A', amount: -1500 });
     deriveKinds(db, 'all');
-    expect(reconcileCardBills(db)).toEqual({ kept: 1, demoted: 1 });
+    expect(reconcileCardBills(db)).toMatchObject({ kept: 1, demoted: 1 });
     applyCategoryRules(db);
     expect([kindOf(db, cal), kindOf(db, max)]).toEqual(['card_payment', 'expense']);
     expect(category(db, cal).name).toBeNull();

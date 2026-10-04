@@ -265,7 +265,7 @@ const BASELINE = `
     source_category TEXT,                -- category supplied by the scraper
     category_id INTEGER REFERENCES categories(id),
     category_source TEXT,                -- scraper | ai | rule | manual
-    kind TEXT,                           -- expense | income | refund | transfer | card_payment | savings
+    kind TEXT,                           -- expense | income | refund | transfer | card_payment | savings | card_covered
     kind_source TEXT,                    -- auto
     matched_txn_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
     raw_json TEXT,
