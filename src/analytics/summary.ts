@@ -1,26 +1,48 @@
 import type { DB } from '../db/connection.js';
 import { SOURCE_NAMES } from '../db/ingestRepo.js';
 import { localDate } from '../ingest/normalize.js';
-import { addDays, cleanMerchantName, merchantKey, round, today } from '../util.js';
+import { addDays, cleanMerchantName, maskLast4, merchantKey, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
 import { holdingValues } from './investments.js';
 
 export type Range = '1M' | '3M' | 'YTD' | '1Y' | 'All';
 export const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
 
+/**
+ * Top-level types: what gets a colour, a chart stack, an allocation slice, a holdings / sidebar group. All fund-type
+ * money (pension, study funds, provident funds, mutual funds) is one type, Funds; the stored asset class stays and is
+ * shown as its sub-type.
+ */
 export const TYPE_LABELS: Record<string, string> = {
-  bank: 'Bank', stock: 'Stocks & ETFs', mutual_fund: 'Funds', crypto: 'Crypto', stablecoin: 'Stablecoins', broker_cash: 'Broker cash',
-  pension: 'Pension', study_fund: 'Study funds', provident_fund: 'Provident funds', deposit: 'Deposits', other: 'Other',
+  bank: 'Bank', stock: 'Stocks & ETFs', funds: 'Funds', crypto: 'Crypto', stablecoin: 'Stablecoins', broker_cash: 'Broker cash',
+  deposit: 'Deposits', other: 'Other',
 };
+export const FUND_CLASSES = new Set(['pension', 'study_fund', 'provident_fund', 'mutual_fund']);
+export const SUB_TYPE_LABELS: Record<string, string> = {
+  pension: 'Pension', study_fund: 'Study fund', provident_fund: 'Provident fund', mutual_fund: 'Mutual fund',
+};
+/** An asset class (or snapshot bucket) → its top-level type. */
+export const topType = (assetClass: string) => (FUND_CLASSES.has(assetClass) ? 'funds' : assetClass);
+export const subTypeOf = (assetClass: string) => SUB_TYPE_LABELS[assetClass] ?? null;
 const INVESTMENT_BUCKETS = new Set(['stock', 'mutual_fund', 'crypto', 'stablecoin', 'broker_cash', 'pension', 'study_fund', 'provident_fund', 'deposit', 'other']);
 export const STALE_MS = 36 * 3600_000;
 
 export const sourceLabel = (source: string) => SOURCE_NAMES[source] ?? source;
 
-/** A report product (holding source report:…) by its provider and symbol, e.g. "מגדל Study fund ••4821". */
+/**
+ * A report product's name (holding source report:…): the product's name as printed in the report; "••1234" (its
+ * account's last 4) is added only when another product has the same name.
+ */
 function reportLabels(db: DB): Map<string, string> {
-  return new Map((db.prepare(`SELECT source, broker, symbol FROM holdings WHERE source LIKE 'report:%'`).all() as
-    { source: string; broker: string | null; symbol: string }[]).map(h => [h.source, `${h.broker ? `${h.broker} ` : ''}${h.symbol}`]));
+  const rows = (db.prepare(`SELECT source, name, symbol FROM holdings WHERE source LIKE 'report:%'`).all() as
+    { source: string; name: string | null; symbol: string }[]).map(h => ({ source: h.source, name: (h.name || h.symbol).trim() }));
+  const count = new Map<string, number>();
+  for (const r of rows) count.set(r.name, (count.get(r.name) ?? 0) + 1);
+  return new Map(rows.map(r => {
+    const last4 = maskLast4(r.source.split(':').slice(2).join(':'));
+    // the name in a bidi isolate (FSI…PDI), so a Hebrew name doesn't pull the suffix to its left
+    return [r.source, (count.get(r.name) ?? 0) > 1 && last4 ? `\u2068${r.name}\u2069 ${last4}` : r.name];
+  }));
 }
 
 /** Each report product's liquidity date (its latest value point's), when stated. */
@@ -97,7 +119,7 @@ function bucketsOf(rows: Snap[]): Buckets {
 export function history(db: DB, range: Range, group: 'type' | 'source', asOf = today()) {
   const from = rangeStart(db, range, asOf);
   const days = dailyValues(db, from, asOf);
-  const keyOf = (s: Snap) => (group === 'type' ? s.bucket : s.source);
+  const keyOf = (s: Snap) => (group === 'type' ? topType(s.bucket) : s.source);
   const keys = new Map<string, number>();
   const points = days.map(({ date, rows }) => {
     const values: Record<string, number> = {};
@@ -155,7 +177,7 @@ export function summary(db: DB, asOf = today()) {
 
   const accounts: {
     id: string; source: string; sourceLabel: string; label: string; kind: 'bank' | 'card' | 'investment';
-    /** bank, cards_owed, or the holdings' asset class (a source's largest) — what the sidebar groups by */
+    /** bank, cards_owed, or the holdings' asset class (a source's largest) */
     assetClass: string;
     valueIls: number | null; value: number | null; currency: string; asOf: string | null; lastSuccessAt: string | null; stale: boolean; fxMissing: boolean;
   }[] = [];
@@ -195,8 +217,9 @@ export function summary(db: DB, asOf = today()) {
       lastSuccessAt: status.get(source)?.last_ok ?? null, stale: stale(source),
       fxMissing: holdings.some(h => h.source === source && h.valueIls == null) });
   }
+  const reports = reportLabels(db);
   for (const h of holdings.filter(x => x.source === 'report')) {
-    accounts.push({ id: h.holdingSource, source: h.holdingSource, sourceLabel: h.broker ?? 'Report', label: h.symbol, kind: 'investment',
+    accounts.push({ id: h.holdingSource, source: h.holdingSource, sourceLabel: h.broker ?? 'Report', label: reports.get(h.holdingSource) ?? h.symbol, kind: 'investment',
       assetClass: h.assetClass, value: h.value, currency: h.currency, valueIls: h.valueIls, asOf: h.priceDate, lastSuccessAt: null, stale: false, fxMissing: h.valueIls == null });
   }
   // a source that never succeeded (e.g. a bank that needs its OTP)
@@ -209,7 +232,6 @@ export function summary(db: DB, asOf = today()) {
 
   const invested = holdings.reduce((a, h) => a + (h.valueIls ?? 0), 0);
   const liquid = liquidityDates(db);
-  const reports = reportLabels(db);
   const allocation = (key: (s: Snap) => string, label: (k: string) => string) => {
     const by = new Map<string, number>();
     for (const s of now) if (s.bucket !== 'cards_owed') by.set(key(s), (by.get(key(s)) ?? 0) + s.value_ils);
@@ -220,18 +242,19 @@ export function summary(db: DB, asOf = today()) {
     asOf,
     ...bucketsOf(now),
     usdRate: rateToIls(db, 'USD', asOf),
-    accounts,
+    // type: the top-level type (bank, cards_owed, stock, funds…) the sidebar groups by; subType: Pension, Study fund…
+    accounts: accounts.map(a => ({ ...a, type: topType(a.assetClass), subType: subTypeOf(a.assetClass) })),
     holdings: holdings
       .sort((a, b) => (b.valueIls ?? 0) - (a.valueIls ?? 0))
       .map(h => ({
-        id: h.id, symbol: h.symbol, name: h.name, source: h.source, sourceLabel: h.source === 'report' ? h.broker ?? 'Report' : sourceLabel(h.source),
-        assetClass: h.assetClass, liquidityDate: liquid.get(h.holdingSource) ?? null,
+        id: h.id, symbol: h.symbol, name: h.name, label: reports.get(h.holdingSource) ?? h.symbol, source: h.source, sourceLabel: h.source === 'report' ? h.broker ?? 'Report' : sourceLabel(h.source),
+        assetClass: h.assetClass, type: topType(h.assetClass), subType: subTypeOf(h.assetClass), liquidityDate: liquid.get(h.holdingSource) ?? null,
         quantity: h.quantity, currency: h.currency, price: h.price, value: h.value, valueIls: h.valueIls, fxMissing: h.valueIls == null,
         gainIls: h.gainIls, gainPct: h.gainPct,
         pctOfInvestments: invested && h.valueIls != null ? round((h.valueIls / invested) * 100) : null,
       })),
     allocation: {
-      type: allocation(s => s.bucket, k => TYPE_LABELS[k] ?? k),
+      type: allocation(s => topType(s.bucket), k => TYPE_LABELS[k] ?? k),
       source: allocation(s => s.source, k => reports.get(k) ?? sourceLabel(k)),
     },
   };

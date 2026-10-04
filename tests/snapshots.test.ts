@@ -6,6 +6,7 @@ import { history, summary } from '../src/analytics/summary.js';
 import { valueHolding } from '../src/analytics/investments.js';
 import { openDb } from '../src/db/connection.js';
 import { addAccount, addBalance, addHolding, addTx, rate, testDb } from './helpers.js';
+import type { DB } from '../src/db/connection.js';
 
 const snaps = (db: ReturnType<typeof testDb>) =>
   db.prepare(`SELECT date, source, bucket, value_ils FROM daily_snapshots ORDER BY date, source, bucket`).all();
@@ -48,7 +49,7 @@ describe('snapshots', () => {
     expect(summary(db, '2026-05-01')).toMatchObject({ netWorth: 435, bank: 0, investments: 735, cardsOwed: 300 });
   });
 
-  it('a mutual fund holding is its own bucket, Funds', () => {
+  it('a mutual fund holding is its own bucket, shown as Funds', () => {
     const db = testDb();
     addHolding(db, { source: 'bank:funds', symbol: '5111111', quantity: 1, currency: 'ILS', assetClass: 'mutual_fund', price: 2500 });
     addHolding(db, { source: 'bank:funds', symbol: 'TEVA.TA', quantity: 10, currency: 'ILS', assetClass: 'stock', price: 50 });
@@ -57,7 +58,7 @@ describe('snapshots', () => {
       { date: '2026-05-01', source: 'bank:funds', bucket: 'mutual_fund', value_ils: 2500 },
       { date: '2026-05-01', source: 'bank:funds', bucket: 'stock', value_ils: 500 },
     ]);
-    expect(summary(db, '2026-05-01')).toMatchObject({ investments: 3000, allocation: { type: [{ key: 'mutual_fund', label: 'Funds', value: 2500 }, { key: 'stock', label: 'Stocks & ETFs', value: 500 }] } });
+    expect(summary(db, '2026-05-01')).toMatchObject({ investments: 3000, allocation: { type: [{ key: 'funds', label: 'Funds', value: 2500 }, { key: 'stock', label: 'Stocks & ETFs', value: 500 }] } });
   });
 
   it('gain since purchase comes from the cost basis, in the holding currency', () => {
@@ -190,5 +191,45 @@ describe('database', () => {
     expect(() => reopened.prepare(`INSERT INTO holdings (source, symbol, quantity, asset_class) VALUES ('x', 'y', 1, 'nope')`).run()).toThrow(/CHECK/);
     reopened.close();
     rmSync(path, { force: true });
+  });
+});
+
+describe('Funds: all fund-type money is one top-level type', () => {
+  const fund = (db: DB, source: string, name: string, assetClass: string, value: number) => {
+    db.prepare(`INSERT INTO holdings (source, symbol, name, quantity, currency, asset_class, broker, manual_price, manual_price_date)
+      VALUES (?, 'x', ?, 1, 'ILS', ?, 'Provider', ?, '2026-05-01')`).run(source, name, assetClass, value);
+    db.prepare(`INSERT INTO daily_snapshots (date, source, bucket, value_ils, as_of) VALUES ('2026-05-01', ?, ?, ?, '2026-05-01')`).run(source, assetClass, value);
+  };
+  const setup = () => {
+    const db = testDb();
+    fund(db, 'report:a:11110001', 'Alpha Pension', 'pension', 400);
+    fund(db, 'report:a:22220002', 'Alpha Study', 'study_fund', 300);
+    fund(db, 'report:a:33330003', 'Alpha Study', 'study_fund', 200);
+    fund(db, 'report:b:44440004', 'Beta Provident', 'provident_fund', 100);
+    fund(db, 'report:c:55550005', 'Gamma Tracker', 'mutual_fund', 50);
+    addHolding(db, { source: 'ibkr:U1', symbol: 'VOO', quantity: 1, currency: 'ILS', assetClass: 'stock', price: 500 });
+    writeSnapshots(db, [{ source: 'ibkr', kind: 'investment', success: true }], '2026-05-01');
+    return db;
+  };
+
+  it('groups pension, study, provident and mutual funds into Funds in the allocation and the chart, keeping the stored class', () => {
+    const db = setup();
+    const s = summary(db, '2026-05-01');
+    expect(s.allocation.type).toEqual([{ key: 'funds', label: 'Funds', value: 1050 }, { key: 'stock', label: 'Stocks & ETFs', value: 500 }]);
+    const h = history(db, 'All', 'type', '2026-05-01');
+    expect(h.series).toEqual([{ key: 'stock', label: 'Stocks & ETFs' }, { key: 'funds', label: 'Funds' }]);
+    expect(h.points.at(-1)!.values).toEqual({ stock: 500, funds: 1050 });
+    expect(db.prepare(`SELECT DISTINCT bucket FROM daily_snapshots ORDER BY 1`).pluck().all())
+      .toEqual(['mutual_fund', 'pension', 'provident_fund', 'stock', 'study_fund']);
+  });
+
+  it('gives holdings and accounts the type Funds with the sub-type, named as printed (••last4 only to tell twins apart)', () => {
+    const s = summary(setup(), '2026-05-01');
+    const funds = s.holdings.filter(h => h.type === 'funds').map(h => [h.label, h.subType]);
+    expect(funds).toEqual([['Alpha Pension', 'Pension'], ['\u2068Alpha Study\u2069 ••0002', 'Study fund'], ['\u2068Alpha Study\u2069 ••0003', 'Study fund'],
+      ['Beta Provident', 'Provident fund'], ['Gamma Tracker', 'Mutual fund']]);
+    expect(s.holdings.find(h => h.symbol === 'VOO')).toMatchObject({ type: 'stock', subType: null, label: 'VOO' });
+    expect(s.accounts.filter(a => a.type === 'funds').map(a => a.label)).toContain('\u2068Alpha Study\u2069 ••0002');
+    expect(s.allocation.source.map(x => x.label)).toContain('\u2068Alpha Study\u2069 ••0003');
   });
 });

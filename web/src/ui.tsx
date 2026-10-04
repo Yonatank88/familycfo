@@ -11,6 +11,16 @@ export const mask = (last4: string | null | undefined) => {
   return digits ? `••${digits.slice(-4)}` : '';
 };
 
+/**
+ * A name from the data (Hebrew or English) in its own direction. A server label "⁨name⁩ ••1234" (the name in a bidi
+ * isolate, then the ••last4 suffix) renders the name isolated and the suffix after it, so a Hebrew name can't pull
+ * the suffix to its left.
+ */
+export function Name({ text }: { text: string }) {
+  const m = text.match(/^\u2068([\s\S]*)\u2069(\s+\S+)$/);
+  return m ? <span><bdi>{m[1]}</bdi>{m[2]}</span> : <bdi>{text}</bdi>;
+}
+
 /** A rounded card: title top-left, an optional quiet action top-right. */
 export function Card({ title, action, children, className = '', flush = false }: {
   title: ReactNode; action?: ReactNode; children: ReactNode; className?: string; flush?: boolean;

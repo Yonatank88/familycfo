@@ -48,9 +48,11 @@ describe('reports', () => {
     expect(snaps(db)).toEqual([{ date: '2026-06-30', source: 'report:מגדל:123456789', bucket: 'study_fund', value_ils: 100_000 }]);
     const s = summary(db, '2026-07-15');
     expect(s.investments).toBe(100_000);
-    expect(s.holdings[0]).toMatchObject({ sourceLabel: 'מגדל', assetClass: 'study_fund', liquidityDate: '2027-03-01' });
-    expect(s.accounts.find(a => a.source.startsWith('report:'))).toMatchObject({ label: 'Study fund ••6789', sourceLabel: 'מגדל', asOf: '2026-06-30' });
-    expect(history(db, 'All', 'type', '2026-07-15').series.map(x => x.label)).toEqual(['Study funds']);
+    expect(s.holdings[0]).toMatchObject({ sourceLabel: 'מגדל', assetClass: 'study_fund', type: 'funds', subType: 'Study fund',
+      label: 'מגדל השתלמות כללי', liquidityDate: '2027-03-01' });
+    expect(s.accounts.find(a => a.source.startsWith('report:'))).toMatchObject({ label: 'מגדל השתלמות כללי', sourceLabel: 'מגדל', asOf: '2026-06-30',
+      type: 'funds', subType: 'Study fund' });
+    expect(history(db, 'All', 'type', '2026-07-15').series.map(x => x.label)).toEqual(['Funds']);
   });
 
   it('the same file again is already imported — the AI is not called', async () => {
@@ -218,7 +220,9 @@ describe('reports', () => {
     expect(snaps(db)).toContainEqual({ date: '2026-06-30', source: 'report:הראל-קרנות-נאמנות:5111111', bucket: 'mutual_fund', value_ils: 30_000 });
     const s = summary(db, '2026-07-15');
     expect(s.investments).toBe(60_000);
-    expect(s.allocation.type).toEqual([{ key: 'mutual_fund', label: 'Funds', value: 50_000 }, { key: 'stock', label: 'Stocks & ETFs', value: 10_000 }]);
+    expect(s.allocation.type).toEqual([{ key: 'funds', label: 'Funds', value: 50_000 }, { key: 'stock', label: 'Stocks & ETFs', value: 10_000 }]);
+    // each fund is named as printed; no account suffix when the names already differ
+    expect(s.holdings.filter(h => h.type === 'funds').map(h => [h.label, h.subType])).toEqual([['הראל מחקה ת"א 125', 'Mutual fund'], ['הראל כספית שקלית', 'Mutual fund']]);
     expect(history(db, 'All', 'type', '2026-07-15').series.map(x => x.label)).toEqual(['Stocks & ETFs', 'Funds']);
     // the next statement finds each fund by its number
     const next = await importReport(db, file(), { extract: ai({ ...statement, asOf: '2026-07-31', statedTotal: null, products: [fund('5111111', 'הראל מחקה תא125', 31_000), ...statement.products.slice(1)] }) });

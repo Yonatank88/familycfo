@@ -7,7 +7,7 @@ import { api, type Account, type ScrapeState, type Summary } from './api';
 import { accountGroup, ACCOUNT_GROUPS, accountSub } from './colors';
 import { asOf, money, type Currency } from './format';
 import { AddReport } from './reports';
-import { Segmented, StaleDot, button, primaryButton } from './ui';
+import { Name, Segmented, StaleDot, button, primaryButton } from './ui';
 
 export type Page = '/' | '/integrations';
 export const PAGES: { path: Page; label: string; icon: typeof LayoutGrid }[] = [
@@ -65,7 +65,7 @@ function AccountRow({ a, currency, convert }: { a: Account; currency: Currency; 
     <li className="flex items-start gap-2 py-1.5 pl-7 pr-2 text-[13px]">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="break-words text-ink"><bdi>{a.label}</bdi></span>
+          <span className="break-words text-ink"><Name text={a.label} /></span>
           {a.stale && <StaleDot lastSuccess={asOf(a.lastSuccessAt)} />}
         </div>
         {sub && <div className="text-xs text-faint">{sub}</div>}

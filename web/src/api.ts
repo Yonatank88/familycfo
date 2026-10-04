@@ -5,11 +5,18 @@ export interface Account {
   id: string; source: string; sourceLabel: string; label: string; kind: 'bank' | 'card' | 'investment';
   /** bank, cards_owed, or the holdings' asset class */
   assetClass: string;
+  /** top-level type (bank, cards_owed, stock, funds…) and, for funds, the sub-type (Pension, Study fund…) */
+  type: string; subType: string | null;
   valueIls: number | null; value: number | null; currency: string; asOf: string | null; lastSuccessAt: string | null;
   stale: boolean; fxMissing: boolean;
 }
 export interface Holding {
-  id: number; symbol: string; name: string; source: string; sourceLabel: string; assetClass: string;
+  id: number; symbol: string; name: string;
+  /** the row's name: the symbol, or a report product's name as printed (••last4 only when two share a name) */
+  label: string;
+  source: string; sourceLabel: string; assetClass: string;
+  /** top-level type (stock, crypto, funds…) and, for funds, the sub-type (Pension, Study fund, Provident fund, Mutual fund) */
+  type: string; subType: string | null;
   quantity: number; currency: string; price: number | null; value: number; valueIls: number | null;
   pctOfInvestments: number | null; changePct: number | null; fxMissing: boolean;
   /** since purchase, from the source's cost basis (IBKR only) */

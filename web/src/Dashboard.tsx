@@ -5,10 +5,10 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, Cell, XAxis } from 'recharts';
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
 import { api, type ExpenseMonth, type Group, type Holding, type History, type Range, type Slice, type Summary } from './api';
-import { FUND_CLASSES, OTHER, PALETTE, SUB_TYPE_LABELS, TYPE_COLORS, TYPE_LABELS } from './colors';
+import { OTHER, PALETTE, TYPE_COLORS, TYPE_LABELS } from './colors';
 import { day, money, monthLong, monthShort, pct, shortDay, signedMoney, signedPct, type Currency } from './format';
 import { AccountGroups } from './Layout';
-import { Card, CardLink, ChangeChip, Dot, Segmented, SidePanel, SubTag } from './ui';
+import { Card, CardLink, ChangeChip, Dot, Name, Segmented, SidePanel, SubTag } from './ui';
 import { cn } from '@/lib/utils';
 
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
@@ -28,7 +28,7 @@ function HistoryTooltip({ active, payload, label, currency, labels }: {
       <div className="mb-1.5 text-muted">{day(String(label))}</div>
       {rows.map(p => (
         <div key={p.key} className="flex items-center justify-between gap-6 py-0.5">
-          <span className="flex items-center gap-1.5 text-muted"><Dot color={p.color} className="h-1.5 w-1.5" /><bdi>{labels[p.key]}</bdi></span>
+          <span className="flex items-center gap-1.5 text-muted"><Dot color={p.color} className="h-1.5 w-1.5" /><Name text={labels[p.key] ?? p.key} /></span>
           <span className="tabular-nums text-ink">{money(p.value, currency)}</span>
         </div>
       ))}
@@ -56,7 +56,7 @@ function Allocation({ slices, currency, convert, colorOf }: {
           const share = (s.value / total) * 100;
           return (
             <li key={s.key} className="grid grid-cols-[minmax(0,1fr)_auto_2.5rem] items-center gap-x-3 py-0.5 sm:grid-cols-[minmax(0,1fr)_6rem_auto_2.5rem]">
-              <span className="flex min-w-0 items-center gap-2 text-ink"><Dot color={colorOf(s.key)} /><span className="truncate"><bdi>{s.label}</bdi></span></span>
+              <span className="flex min-w-0 items-center gap-2 text-ink"><Dot color={colorOf(s.key)} /><span className="truncate"><Name text={s.label} /></span></span>
               <span className="h-1.5 overflow-hidden rounded-full bg-line max-sm:hidden">
                 <span className="block h-full rounded-full" style={{ width: `${Math.max(2, share)}%`, background: colorOf(s.key) }} />
               </span>
@@ -243,15 +243,15 @@ function Spending({ months, current }: { months: ExpenseMonth[]; current: string
 
 // ---- holdings ----------------------------------------------------------------------------------------------
 
-/** The holdings' group: top-level type (fund-type products together as Funds). */
-const groupOf = (h: Holding) => (FUND_CLASSES.has(h.assetClass) ? 'funds' : h.assetClass);
-const groupLabel = (g: string) => (g === 'funds' ? 'Funds' : TYPE_LABELS[g] ?? g);
-const groupColor = (g: string) => (g === 'funds' ? 'var(--c4)' : TYPE_COLORS[g] ?? OTHER);
+/** The holdings' group: the top-level type (all fund-type products are Funds). */
+const groupOf = (h: Holding) => h.type;
+const groupLabel = (g: string) => TYPE_LABELS[g] ?? g;
+const groupColor = (g: string) => TYPE_COLORS[g] ?? OTHER;
 
-/** A holding's second line: its source (unless the name already says it) and its name (when not the symbol). */
+/** A holding's second line: its source (unless the name already says it) and its name (when not the row's label). */
 const holdingSub = (h: Holding) => [
-  h.name.includes(h.sourceLabel) || h.symbol.includes(h.sourceLabel) ? null : h.sourceLabel,
-  h.name !== h.symbol ? h.name : null,
+  h.name.includes(h.sourceLabel) || h.label.includes(h.sourceLabel) ? null : h.sourceLabel,
+  h.label.includes(h.name) || h.name === h.symbol ? null : h.name,
 ].filter(Boolean).join(' · ');
 
 const valueIls = (h: Holding) => h.valueIls ?? -Infinity;
@@ -271,7 +271,7 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
   const [sorting, setSorting] = useState<SortingState>([{ id: 'value', desc: true }]);
   const money$ = (h: Holding) => (h.valueIls == null ? money(h.value, h.currency) : money(convert(h.valueIls), currency));
   const columns = useMemo<ColumnDef<Holding>[]>(() => [
-    { id: 'name', accessorFn: h => h.symbol, header: ({ column }) => <SortHead label="Name" column={column} align="left" /> },
+    { id: 'name', accessorFn: h => h.label, header: ({ column }) => <SortHead label="Name" column={column} align="left" /> },
     { id: 'value', accessorFn: valueIls, header: ({ column }) => <SortHead label="Value" column={column} /> },
     { id: 'weight', accessorFn: h => h.pctOfInvestments ?? -Infinity, header: ({ column }) => <SortHead label="Weight" column={column} /> },
     { id: 'change', accessorFn: h => h.changePct ?? -Infinity, header: ({ column }) => <SortHead label="Change" column={column} /> },
@@ -324,7 +324,7 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
                   return (
                     <tr key={h.id} className="hover:bg-paper">
                       <td className={td}>
-                        <div className="flex flex-wrap items-center gap-x-2 font-medium text-ink"><bdi>{h.symbol}</bdi>{SUB_TYPE_LABELS[h.assetClass] && <SubTag>{SUB_TYPE_LABELS[h.assetClass]}</SubTag>}</div>
+                        <div className="flex flex-wrap items-center gap-x-2 font-medium text-ink"><Name text={h.label} />{h.subType && <SubTag>{h.subType}</SubTag>}</div>
                         {sub && <div className="text-xs text-faint"><bdi>{sub}</bdi></div>}
                       </td>
                       <td className={cn(td, 'whitespace-nowrap text-right tabular-nums', h.fxMissing ? 'text-warn' : 'text-ink')}>{money$(h)}</td>
@@ -360,9 +360,9 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
               {g.rows.map(h => (
                 <li key={h.id} className="flex min-h-12 items-center gap-3 px-5 py-2">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-ink"><bdi>{h.symbol}</bdi></div>
-                    <div className="truncate text-xs text-faint">
-                      {SUB_TYPE_LABELS[h.assetClass] ?? <bdi>{holdingSub(h)}</bdi>}
+                    <div className="break-words text-sm font-medium text-ink"><Name text={h.label} /></div>
+                    <div className="flex items-center gap-1.5 truncate text-xs text-faint">
+                      {h.subType ? <SubTag>{h.subType}</SubTag> : <bdi>{holdingSub(h)}</bdi>}
                     </div>
                   </div>
                   <div className="shrink-0 text-right tabular-nums">
