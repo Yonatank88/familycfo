@@ -6,8 +6,11 @@ import type { AssetClass } from '../sync/assets.js';
 /** A synced holding at its latest price (the quote's, else the source's own), in its currency and in ILS. */
 export interface HoldingValue {
   id: number;
-  /** the investment source id (ibkr, wallets, binance…) */
+  /** the investment source id (ibkr, wallets, binance, report…) */
   source: string;
+  /** the holding's own source: <source id>:<account> */
+  holdingSource: string;
+  broker: string | null;
   symbol: string;
   name: string;
   quantity: number;
@@ -15,6 +18,8 @@ export interface HoldingValue {
   assetClass: AssetClass;
   price: number | null;
   priceSource: 'quote' | 'source' | 'none';
+  /** the date of the source's own price (a report's as-of date), when it is used */
+  priceDate: string | null;
   value: number;
   /** null when there is no exchange rate for its currency — it's left out of totals, never valued 1:1 */
   valueIls: number | null;
@@ -45,9 +50,9 @@ export function valueHolding(db: DB, h: Row, asOf = today()): HoldingValue {
   const cost: number | null = h.cost_basis != null && price != null && currency === (h.currency ?? currency) ? h.cost_basis : null;
   const gain = cost == null ? null : value - cost;
   return {
-    id: h.id, source: String(h.source).split(':')[0], symbol: h.symbol, name: h.name || h.quote_name || h.symbol,
+    id: h.id, source: String(h.source).split(':')[0], holdingSource: h.source, broker: h.broker ?? null, symbol: h.symbol, name: h.name || h.quote_name || h.symbol,
     quantity: h.quantity, currency, assetClass: h.asset_class,
-    price, priceSource: manual ? 'source' : price != null ? 'quote' : 'none',
+    price, priceSource: manual ? 'source' : price != null ? 'quote' : 'none', priceDate: manual ? h.manual_price_date ?? null : null,
     value: round(value), valueIls: rate == null ? null : round(value * rate),
     gain: gain == null ? null : round(gain), gainIls: gain == null || rate == null ? null : round(gain * rate),
     gainPct: gain == null || !cost ? null : round((gain / Math.abs(cost)) * 100),

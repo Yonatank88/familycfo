@@ -17,18 +17,21 @@
     "web": "npm --prefix web run dev",
     "link": "tsx src/link.ts",
     "pipeline": "tsx src/pipeline.ts",
+    "import": "tsx src/reports/cli.ts",
     "schedule:install": "scripts/schedule.sh install",
     "schedule:uninstall": "scripts/schedule.sh uninstall",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/multipart": "^9.4.0",
     "better-sqlite3": "^11.7.0",
     "fast-xml-parser": "^4.5.7",
     "fastify": "^5.12.5",
     "israeli-bank-scrapers": "^6.12.2",
     "node-cron": "^3.0.3",
     "puppeteer": "^24.37.1",
+    "read-excel-file": "^9.3.10",
     "zod": "^3.25.76"
   },
   "devDependencies": {
