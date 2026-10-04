@@ -256,7 +256,7 @@ export function summary(db: DB, asOf = today(), owners: Map<string, string> = ne
         id: h.id, symbol: h.symbol, name: h.name, label: reports.get(h.holdingSource) ?? h.symbol, owner: ownerOf(h.source === 'report' ? h.holdingSource : h.source), source: h.source, sourceLabel: h.source === 'report' ? h.broker ?? 'Report' : sourceLabel(h.source),
         assetClass: h.assetClass, type: topType(h.assetClass), subType: subTypeOf(h.assetClass), liquidityDate: liquid.get(h.holdingSource) ?? null,
         quantity: h.quantity, currency: h.currency, price: h.price, value: h.value, valueIls: h.valueIls, fxMissing: h.valueIls == null,
-        gainIls: h.gainIls, gainPct: h.gainPct,
+        gainIls: h.gainIls, gainPct: h.gainPct, openedAt: h.openedAt, costSource: h.costSource,
         pctOfInvestments: invested && h.valueIls != null ? round((h.valueIls / invested) * 100) : null,
       })),
     allocation: {

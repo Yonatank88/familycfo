@@ -256,7 +256,7 @@ const holdingSub = (h: Holding): string[] => [
 
 const valueIls = (h: Holding) => h.valueIls ?? -Infinity;
 
-function SortHead({ label, column, align = 'right' }: { label: string; column: { getIsSorted: () => false | 'asc' | 'desc'; toggleSorting: (desc?: boolean) => void }; align?: 'left' | 'right' }) {
+export function SortHead({ label, column, align = 'right' }: { label: string; column: { getIsSorted: () => false | 'asc' | 'desc'; toggleSorting: (desc?: boolean) => void }; align?: 'left' | 'right' }) {
   const sorted = column.getIsSorted();
   const Icon = sorted === 'asc' ? ArrowUp : ArrowDown;
   return (

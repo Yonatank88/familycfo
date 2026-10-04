@@ -21,6 +21,8 @@ export const signedMoney = (n: number | null | undefined, currency: Currency) =>
   n == null ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${money(Math.abs(n), currency)}`;
 export const signedPct = (n: number | null | undefined) =>
   n == null || !Number.isFinite(n) ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}%`;
+/** A quantity: whole above 1,000, else up to 4 decimals (6 below 1). */
+export const quantity = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: Math.abs(n) >= 1000 ? 0 : Math.abs(n) >= 1 ? 4 : 6 });
 export const pct = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(1)}%`);
 
 const dayFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });

@@ -27,6 +27,15 @@ export interface Holding {
   gainIls: number | null; gainPct: number | null;
   /** when a report product can be withdrawn (study funds) */
   liquidityDate: string | null;
+  /** when the position was opened, when the source tells */
+  openedAt: string | null;
+  /** broker (IBKR) | trades (exchange average cost) */
+  costSource: string | null;
+}
+export interface Investments {
+  range: Range; usdRate: number | null;
+  totals: { valueIls: number; gainIls: number | null; gainPct: number | null; coveredPct: number | null };
+  holdings: Holding[];
 }
 export interface Slice { key: string; label: string; value: number }
 export interface Summary {
@@ -133,6 +142,7 @@ export const api = {
   expenses: () => request<Expenses>('/api/expenses?months=12'),
   expenseRows: (month: string, merchant?: string) =>
     request<ExpenseRow[]>(`/api/expenses/rows?month=${month}${merchant ? `&merchant=${encodeURIComponent(merchant)}` : ''}`),
+  investments: (range: Range) => request<Investments>(`/api/investments?range=${range}`),
   cashFlow: (range: Range, account?: string) => request<CashFlow>(`/api/cashflow?range=${range}${account ? `&account=${encodeURIComponent(account)}` : ''}`),
   cashFlowRows: (month: string, account?: string) =>
     request<CashFlowRows>(`/api/cashflow/rows?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ''}`),

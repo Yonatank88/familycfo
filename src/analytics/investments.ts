@@ -27,6 +27,10 @@ export interface HoldingValue {
   gain: number | null;
   gainIls: number | null;
   gainPct: number | null;
+  /** YYYY-MM-DD the position was opened, when the source tells (IBKR, exchange history, a wallet's first transfer in) */
+  openedAt: string | null;
+  /** where the cost came from: broker (IBKR) | trades (an exchange's average cost) */
+  costSource: string | null;
 }
 
 type Row = Record<string, any>;
@@ -56,6 +60,7 @@ export function valueHolding(db: DB, h: Row, asOf = today()): HoldingValue {
     value: round(value), valueIls: rate == null ? null : round(value * rate),
     gain: gain == null ? null : round(gain), gainIls: gain == null || rate == null ? null : round(gain * rate),
     gainPct: gain == null || !cost ? null : round((gain / Math.abs(cost)) * 100),
+    openedAt: h.opened_at ?? null, costSource: cost == null ? null : h.cost_basis_source ?? null,
   };
 }
 

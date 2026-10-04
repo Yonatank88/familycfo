@@ -4,6 +4,7 @@ import { api, type Range } from './api';
 import type { Currency } from './format';
 import Bank from './Bank';
 import Dashboard from './Dashboard';
+import Investments from './Investments';
 import IntegrationEditor, { type EditorMode } from './IntegrationEditor';
 import Integrations from './Integrations';
 import { Layout, PAGES, type Page } from './Layout';
@@ -42,7 +43,9 @@ export default function App() {
         ? <Integrations currency={currency} convert={convert} reports={reports} onOpenReport={setOpenReport} onEdit={key => setEditor({ kind: 'edit', key })} />
         : page === '/bank'
           ? <Bank range={range} setRange={setRange} currency={currency} convert={convert} />
-          : <Dashboard summary={summary.data} range={range} setRange={setRange} currency={currency} convert={convert} />}
+          : page === '/investments'
+            ? <Investments range={range} setRange={setRange} currency={currency} convert={convert} />
+            : <Dashboard summary={summary.data} range={range} setRange={setRange} currency={currency} convert={convert} />}
       {openReport != null && <ReportPanel id={openReport} onClose={() => setOpenReport(null)} />}
       {editor && <IntegrationEditor mode={editor} onClose={() => setEditor(null)} />}
     </Layout>

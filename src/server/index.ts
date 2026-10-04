@@ -44,15 +44,39 @@ const rangeOf = (v: unknown): Range => {
   return r as Range;
 };
 
+/** The summary's holdings, each with its price change over `range` (when it has a quote). */
+async function withChanges(s: ReturnType<typeof summary>, range: Range) {
+  const from = rangeStart(db, range);
+  const quoted = new Set(db.prepare(`SELECT symbol FROM holdings WHERE archived = 0 AND manual_price IS NULL`).pluck().all() as string[]);
+  const changes = await Promise.all(s.holdings.map(h => (quoted.has(h.symbol) ? priceChangeSince(h.symbol, from) : Promise.resolve(null))));
+  return s.holdings.map((h, i) => ({ ...h, changePct: changes[i] == null ? null : round(changes[i]!) }));
+}
+
 // net worth, buckets, accounts and holdings (each with its price change over `range`, when it has a quote)
 app.get('/api/summary', async req => {
   const range = rangeOf((req.query as Record<string, string>).range);
   // each integration's owner (display only) — inherited by its accounts and holdings
   const s = summary(db, undefined, configOwners(configOrNull()));
-  const from = rangeStart(db, range);
-  const quoted = new Set(db.prepare(`SELECT symbol FROM holdings WHERE archived = 0 AND manual_price IS NULL`).pluck().all() as string[]);
-  const changes = await Promise.all(s.holdings.map(h => (quoted.has(h.symbol) ? priceChangeSince(h.symbol, from) : Promise.resolve(null))));
-  return { ...s, range, holdings: s.holdings.map((h, i) => ({ ...h, changePct: changes[i] == null ? null : round(changes[i]!) })) };
+  return { ...s, range, holdings: await withChanges(s, range) };
+});
+
+// every investment holding (not funds): value, opened, gain since opened, change over the range; totals with the
+// gain where its cost is known and the share of the value that covers
+app.get('/api/investments', async req => {
+  const range = rangeOf((req.query as Record<string, string>).range);
+  const s = summary(db, undefined, configOwners(configOrNull()));
+  const holdings = (await withChanges(s, range)).filter(h => h.type !== 'funds');
+  const value = holdings.reduce((a, h) => a + (h.valueIls ?? 0), 0);
+  const known = holdings.filter(h => h.gainIls != null && h.valueIls != null);
+  const gain = known.reduce((a, h) => a + h.gainIls!, 0);
+  const coveredValue = known.reduce((a, h) => a + h.valueIls!, 0);
+  const cost = coveredValue - gain;
+  return {
+    range, usdRate: s.usdRate,
+    totals: { valueIls: round(value), gainIls: known.length ? round(gain) : null, gainPct: known.length && cost ? round((gain / Math.abs(cost)) * 100) : null,
+      coveredPct: value ? round((coveredValue / value) * 100) : null },
+    holdings,
+  };
 });
 
 app.get('/api/history', async req => {
