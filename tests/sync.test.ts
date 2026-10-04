@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { baseCoin, coinAssetClass, ibkrAssetClass, STABLECOINS } from '../src/sync/assets.js';
 import { parseFlexStatement } from '../src/sync/ibkr.js';
 import { exchangePositions } from '../src/sync/exchange.js';
-import { cryptoYahooSymbol, walletPositions } from '../src/sync/wallets.js';
+import { cryptoYahooSymbol, walletPositions, usdPrices } from '../src/sync/wallets.js';
 import { syncHoldings } from '../src/sync/holdings.js';
 import { testDb } from './helpers.js';
 
@@ -55,6 +55,14 @@ describe('asset classes', () => {
     expect(by.USDC).toMatchObject({ price: 0.9995, assetClass: 'stablecoin' });
     expect(by.USD).toMatchObject({ currency: 'USD', price: 1, assetClass: 'broker_cash' });
     expect(by.DOGE).toBeUndefined(); // dust
+  });
+
+  it('cSSV has no price of its own: it borrows SSV\'s, even from another wallet, and gets no Yahoo symbol', () => {
+    const cssv = { network: 'eth-mainnet', tokenAddress: '0x2', tokenBalance: '0x' + (10n * 10n ** 18n).toString(16), tokenMetadata: { symbol: 'cSSV', decimals: 18 }, tokenPrices: [] };
+    const ssv = { network: 'eth-mainnet', tokenAddress: '0x3', tokenBalance: '0x' + (2n * 10n ** 18n).toString(16), tokenMetadata: { symbol: 'SSV', decimals: 18 }, tokenPrices: [{ currency: 'usd', value: '3' }] };
+    expect(walletPositions([cssv])).toEqual([]); // no SSV price anywhere → nothing to value it with
+    const [p] = walletPositions([cssv], 1, usdPrices([ssv]));
+    expect(p).toMatchObject({ symbol: 'CSSV', yahoo: null, quantity: 10, price: 3, assetClass: 'crypto' });
   });
 
   it('wallet tokens get their class', () => {

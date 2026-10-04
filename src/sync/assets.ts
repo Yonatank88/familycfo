@@ -26,6 +26,9 @@ export function baseCoin(symbol: string): string {
 
 export const isStablecoin = (symbol: string) => STABLECOINS.has(baseCoin(symbol));
 
+/** Tokens that trade at another coin's price, so they're valued with it when nothing quotes them (cSSV ≈ SSV). */
+export const PRICED_AS: Record<string, string> = { CSSV: 'SSV' };
+
 /** A coin or currency held at an exchange or in a wallet. */
 export function coinAssetClass(symbol: string): AssetClass {
   const s = symbol.trim().toUpperCase();

@@ -1,5 +1,5 @@
 import type { SyncedAccount, SyncedPosition } from './holdings.js';
-import { baseCoin, coinAssetClass } from './assets.js';
+import { PRICED_AS, baseCoin, coinAssetClass } from './assets.js';
 
 /**
  * Self-custody wallets (EVM) through Alchemy's Portfolio API: every token of each address on the configured
@@ -68,24 +68,39 @@ export function tokenContracts(tokens: any[]): Map<string, { network: string; co
   return out;
 }
 
+/** Alchemy's USD price per symbol across token lists — lets a token priced like another (PRICED_AS) borrow its price. */
+export function usdPrices(tokens: any[]): Map<string, number> {
+  const prices = new Map<string, number>();
+  for (const t of tokens) {
+    const symbol = symbolOf(t);
+    const price = Number((t.tokenPrices ?? []).find((p: any) => p.currency?.toLowerCase() === 'usd')?.value ?? 0);
+    if (symbol && price) prices.set(symbol.toUpperCase(), price);
+  }
+  return prices;
+}
+
 /** Alchemy's tokens of one address → positions, one per symbol (the same coin on several networks adds up). */
-export function walletPositions(tokens: any[], minUsd = 1): SyncedPosition[] {
-  const bySymbol = new Map<string, { name: string | null; quantity: number; value: number }>();
+export function walletPositions(tokens: any[], minUsd = 1, prices: Map<string, number> = usdPrices(tokens)): SyncedPosition[] {
+  const bySymbol = new Map<string, { name: string | null; quantity: number; value: number; borrowed: boolean }>();
   for (const t of tokens) {
     const symbol = symbolOf(t);
     if (!symbol) continue;
     const quantity = units(t.tokenBalance, t.tokenMetadata?.decimals ?? 18);
-    const price = Number((t.tokenPrices ?? []).find((p: any) => p.currency?.toLowerCase() === 'usd')?.value ?? 0);
+    let price = Number((t.tokenPrices ?? []).find((p: any) => p.currency?.toLowerCase() === 'usd')?.value ?? 0);
+    const like = PRICED_AS[symbol.toUpperCase()];
+    const borrowed = !price && !!like;
+    if (borrowed) price = prices.get(like) ?? 0;
     if (!quantity || !price) continue;
-    const cur = bySymbol.get(symbol) ?? { name: t.tokenMetadata?.name ?? null, quantity: 0, value: 0 };
+    const cur = bySymbol.get(symbol) ?? { name: t.tokenMetadata?.name ?? null, quantity: 0, value: 0, borrowed };
     cur.quantity += quantity;
     cur.value += quantity * price;
     bySymbol.set(symbol, cur);
   }
   return [...bySymbol.entries()]
     .filter(([, v]) => v.value >= minUsd)
-    .map(([symbol, v]) => ({ symbol, yahoo: cryptoYahooSymbol(symbol), name: v.name, quantity: v.quantity, currency: 'USD',
-      assetClass: coinAssetClass(symbol), price: v.value / v.quantity }));
+    // a borrowed price has no quote of its own (and its look-alike's Yahoo symbol would collide with the real coin)
+    .map(([symbol, v]) => ({ symbol, yahoo: v.borrowed ? null : cryptoYahooSymbol(symbol), name: v.name, quantity: v.quantity,
+      currency: 'USD', assetClass: coinAssetClass(symbol), price: v.value / v.quantity }));
 }
 
 /** Networks where Alchemy indexes internal (contract → address) native transfers. */
@@ -127,12 +142,19 @@ export async function fetchWallets(cfg: WalletsSource, opts: { known?: (source: 
   const history: Record<string, unknown> = {};
   const warnings = new Set<string>();
   const accounts: SyncedAccount[] = [];
+  // all wallets first, so a token priced like another coin can borrow that coin's price from any wallet
+  const tokensBy = new Map<string, any[]>();
   for (const w of cfg.wallets ?? []) {
     const address = w.address.trim().toLowerCase();
-    const tokens = await tokensOf(cfg.apiKey, address, networks);
+    tokensBy.set(address, await tokensOf(cfg.apiKey, address, networks));
+  }
+  const prices = usdPrices([...tokensBy.values()].flat());
+  for (const w of cfg.wallets ?? []) {
+    const address = w.address.trim().toLowerCase();
+    const tokens = tokensBy.get(address)!;
     raw[address] = tokens;
     const source = `${id}:${address}`;
-    const positions = walletPositions(tokens, cfg.minUsd ?? 1);
+    const positions = walletPositions(tokens, cfg.minUsd ?? 1, prices);
     const contracts = tokenContracts(tokens);
     for (const p of positions) {
       const stored = opts.known?.(source, (p.yahoo ?? p.symbol).toUpperCase());
