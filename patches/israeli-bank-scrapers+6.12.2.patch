@@ -47,6 +47,173 @@ index 618bf63..726cb92 100644
  }
  async function fetchGraphql(url, query, variables = {}, extraHeaders = {}) {
    const result = await fetchPost(url, {
+diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js b/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
+index 4e821fa..fa19e6f 100644
+--- a/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
++++ b/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
+@@ -7,6 +7,9 @@ exports.clickAccountSelectorGetAccountIds = clickAccountSelectorGetAccountIds;
+ exports.createLoginFields = createLoginFields;
+ exports.default = void 0;
+ exports.getPossibleLoginResults = getPossibleLoginResults;
++exports.parseForeignPortfolio = parseForeignPortfolio;
++exports.parseForeignMovements = parseForeignMovements;
++exports.fetchForeignCurrencyAccounts = fetchForeignCurrencyAccounts;
+ exports.selectAccountFromDropdown = selectAccountFromDropdown;
+ exports.waitForPostLogin = waitForPostLogin;
+ var _moment = _interopRequireDefault(require("moment"));
+@@ -396,6 +399,144 @@ async function fetchAccounts(page, startDate, options) {
+   }
+   return accounts;
+ }
++// --- Foreign-currency (מט"ח) current accounts: the ILS flow above never sees them ---
++// Balances: "תיק מט"ח" (one "פרוט למטבע <name>" section per currency, column "יתרה עדכנית");
++// movements: "תנועות בחשבון מט"ח" (select #IN-SCH-MTB = account type (3) + bank currency code (3), table #dataTable040).
++const FX_PORTFOLIO_PATH = '/wps/myportal/FibiMenu/Online/OnForeignCurrency/OnCurrentAccountFC/AuthFCTransFCPortfolio';
++const FX_MOVEMENTS_PATH = '/wps/myportal/FibiMenu/Online/OnForeignCurrency/OnCurrentAccountFC/AuthFCCurrentMovements';
++const FX_SECTION_TITLE = 'פרוט למטבע';
++const FX_OPENING_BALANCE = 'יתרת פתיחה';
++const FX_CURRENCY_NAMES = [[/דולר\s*ארה|דולר\s*אמריקאי/, 'USD'], [/אירו|יורו/, 'EUR'], [/לירה\s*שטרלינג|ליש"ט|ליש״ט|שטרלינג/, 'GBP'], [/פרנק\s*שוו?יצרי/, 'CHF'], [/ין\s*יפני|^ין$/, 'JPY'], [/דולר\s*קנדי/, 'CAD'], [/דולר\s*אוסטרלי/, 'AUD'], [/דולר\s*ניו\s*זילנדי/, 'NZD'], [/כתר\s*שוודי/, 'SEK'], [/כתר\s*נורבגי/, 'NOK'], [/כתר\s*דני/, 'DKK'], [/רנד/, 'ZAR'], [/יואן|רנמינבי/, 'CNY'], [/דולר\s*הונג\s*קונג/, 'HKD'], [/זלוטי/, 'PLN'], [/פורינט/, 'HUF'], [/רובל/, 'RUB'], [/לירה\s*טורקית/, 'TRY']];
++// the bank's own currency codes, the last 3 digits of an #IN-SCH-MTB option value
++const FX_BANK_CODES = { '001': 'USD' };
++function fxCurrencyCode(text, bankCode) {
++  const iso = /\b([A-Z]{3})\b/.exec(text || '');
++  if (iso) return iso[1];
++  for (const [re, code] of FX_CURRENCY_NAMES) if (re.test(text || '')) return code;
++  return bankCode && FX_BANK_CODES[bankCode] || null;
++}
++function fxAmount(text) {
++  const value = parseFloat(String(text || '').replace(/[^\d.,-]/g, '').replaceAll(',', ''));
++  return Number.isFinite(value) ? value : null;
++}
++/** sections: [{ title, headers, rows }] as read from "תיק מט"ח" → [{ currency, balance }] (rows of a currency summed) */
++function parseForeignPortfolio(sections) {
++  const byCurrency = new Map();
++  for (const section of sections || []) {
++    const name = (section.title || '').replace(FX_SECTION_TITLE, '').trim();
++    const currency = fxCurrencyCode(name);
++    const col = (section.headers || []).findIndex(h => /יתרה\s*עדכנית/.test(h));
++    if (!currency || currency === 'ILS' || col < 0) continue;
++    let total = null;
++    for (const row of section.rows || []) {
++      const value = fxAmount(row[col]);
++      if (value !== null) total = (total ?? 0) + value;
++    }
++    if (total !== null) byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + total);
++  }
++  return [...byCurrency].map(([currency, balance]) => ({ currency, balance: Math.round(balance * 100) / 100 }));
++}
++/** the #dataTable040 of one currency → library transactions in that currency */
++function parseForeignMovements(headers, rows, currency, options) {
++  const col = re => (headers || []).findIndex(h => re.test(h));
++  const c = { date: col(/^\s*תאריך\s*$/), value: col(/^\s*ערך\s*$/), ref: col(/אסמכתא/), desc: col(/תאור|תיאור/), debit: col(/חובה/), credit: col(/זכות/) };
++  const txns = [];
++  for (const row of rows || []) {
++    const description = (row[c.desc] || '').trim();
++    const date = (row[c.date] || '').trim();
++    if (!date || description === FX_OPENING_BALANCE) continue;
++    const amount = (fxAmount(row[c.credit]) ?? 0) - (fxAmount(row[c.debit]) ?? 0);
++    const when = (0, _moment.default)(date, DATE_FORMAT);
++    if (!when.isValid()) continue;
++    const valueDate = (0, _moment.default)((row[c.value] || '').trim(), DATE_FORMAT);
++    const reference = parseInt((row[c.ref] || '').trim(), 10);
++    const txn = {
++      type: _transactions2.TransactionTypes.Normal,
++      identifier: Number.isNaN(reference) ? undefined : reference,
++      date: when.toISOString(),
++      processedDate: (valueDate.isValid() ? valueDate : when).toISOString(),
++      originalAmount: amount,
++      originalCurrency: currency,
++      chargedAmount: amount,
++      chargedCurrency: currency,
++      status: _transactions2.TransactionStatuses.Completed,
++      description
++    };
++    if (options?.includeRawTransaction) {
++      txn.rawTransaction = (0, _transactions.getRawTransaction)({ row, headers });
++    }
++    txns.push(txn);
++  }
++  return txns;
++}
++async function openOldPage(scraper, path, readySelector) {
++  await scraper.navigateTo(`${scraper.BASE_URL}${path}`);
++  const frame = (await getTransactionsFrame(scraper.page)) || scraper.page;
++  await (0, _elementsInteractions.waitUntilElementFound)(frame, readySelector, false, ELEMENT_RENDER_TIMEOUT_MS);
++  return frame;
++}
++async function readTable(frame, tableSelector) {
++  return frame.$eval(tableSelector, table => ({
++    headers: Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim()),
++    rows: Array.from(table.querySelectorAll('tbody tr')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.innerText))
++  }));
++}
++async function fetchForeignMovements(scraper, startMoment) {
++  const frame = await openOldPage(scraper, FX_MOVEMENTS_PATH, '#IN-SCH-MTB');
++  const choices = await frame.$$eval('#IN-SCH-MTB option', os => os.map(o => ({ value: o.value, text: o.innerText })));
++  const result = new Map();
++  for (const choice of choices) {
++    const currency = fxCurrencyCode(choice.text.split('-').pop(), choice.value.slice(3, 6));
++    if (!currency || currency === 'ILS') continue;
++    const page = await openOldPage(scraper, FX_MOVEMENTS_PATH, '#IN-SCH-MTB');
++    await page.select('#IN-SCH-MTB', choice.value);
++    await page.$eval('#fromDate', (el, value) => { el.value = value; }, startMoment.format(DATE_FORMAT));
++    await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => null), page.click('input[name="GO"]')]);
++    const shown = (await getTransactionsFrame(scraper.page)) || scraper.page;
++    await (0, _elementsInteractions.waitUntilElementFound)(shown, '#IN-SCH-MTB', false, ELEMENT_RENDER_TIMEOUT_MS);
++    if (!(await (0, _elementsInteractions.elementPresentOnPage)(shown, 'table#dataTable040'))) {
++      result.set(currency, []);
++      continue;
++    }
++    const { headers, rows } = await readTable(shown, 'table#dataTable040');
++    result.set(currency, [...(result.get(currency) || []), ...parseForeignMovements(headers, rows, currency, scraper.options)]);
++  }
++  return result;
++}
++/** One scraper account per foreign currency: `${accountNumber}-${currency}`. Never throws — the ILS result stands alone. */
++async function fetchForeignCurrencyAccounts(scraper, startMoment) {
++  try {
++    const frame = await openOldPage(scraper, FX_PORTFOLIO_PATH, ACCOUNTS_NUMBER);
++    const accountNumber = await getAccountNumber(frame);
++    const sections = await frame.$$eval('h1, h2, h3, h4', (hs, title) => hs.filter(h => h.innerText.includes(title)).map(h => {
++      // the section's table is the next table.data after its heading
++      const all = Array.from(document.querySelectorAll('table.data'));
++      const table = all.find(t => h.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING);
++      return {
++        title: h.innerText.trim(),
++        headers: table ? Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim()) : [],
++        rows: table ? Array.from(table.querySelectorAll('tbody tr')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.innerText)) : []
++      };
++    }), FX_SECTION_TITLE);
++    const balances = parseForeignPortfolio(sections);
++    if (!balances.length) return [];
++    let movements = new Map();
++    try {
++      movements = await fetchForeignMovements(scraper, startMoment);
++    } catch (e) {
++      console.warn(`[beinleumi-group] foreign-currency movements skipped: ${e?.message}`);
++    }
++    return balances.map(({ currency, balance }) => ({
++      accountNumber: `${accountNumber}-${currency}`,
++      currency,
++      balance,
++      txns: movements.get(currency) || []
++    }));
++  } catch (e) {
++    console.warn(`[beinleumi-group] foreign-currency accounts skipped: ${e?.message}`);
++    return [];
++  }
++}
+ class BeinleumiGroupBaseScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+   BASE_URL = '';
+   LOGIN_URL = '';
+@@ -423,6 +564,7 @@ class BeinleumiGroupBaseScraper extends _baseScraperWithBrowser.BaseScraperWithB
+     const startMoment = _moment.default.max(startMomentLimit, (0, _moment.default)(startDate));
+     await this.navigateTo(this.TRANSACTIONS_URL);
+     const accounts = await fetchAccounts(this.page, startMoment, this.options);
++    accounts.push(...(await fetchForeignCurrencyAccounts(this, startMoment)));
+     return {
+       success: true,
+       accounts
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
 index 4ffa0b2..e745530 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
