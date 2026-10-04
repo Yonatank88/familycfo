@@ -27,6 +27,8 @@ const dayFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short'
 const shortDayFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 const monthFmt = new Intl.DateTimeFormat('en-GB', { month: 'short' });
 const monthYearFmt = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' });
+const shortMonthYearFmt = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' });
+const tinyMonthYearFmt = new Intl.DateTimeFormat('en-GB', { month: 'short', year: '2-digit' });
 const timeFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 const atNoon = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00`);
@@ -34,6 +36,8 @@ export const day = (d: string) => dayFmt.format(atNoon(d));
 export const shortDay = (d: string) => shortDayFmt.format(atNoon(d));
 export const monthShort = (m: string) => monthFmt.format(atNoon(`${m}-01`));
 export const monthLong = (m: string) => monthYearFmt.format(atNoon(`${m}-01`));
+export const monthYear = (m: string) => shortMonthYearFmt.format(atNoon(`${m}-01`));
+export const monthYearTiny = (m: string) => tinyMonthYearFmt.format(atNoon(`${m}-01`));
 /** A data time: date-only values as a date, timestamps with the time. */
 export const asOf = (iso: string | null) => (!iso ? '—' : iso.length <= 10 ? day(iso) : timeFmt.format(new Date(iso)));
 

@@ -4,6 +4,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import type { Range } from './api';
 
 /** "••1234": the last 4 digits of an account number — the only way one is shown. */
 export const mask = (last4: string | null | undefined) => {
@@ -65,6 +66,13 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
       ))}
     </ToggleGroup>
   );
+}
+
+export const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
+
+/** The page's range (1M 3M YTD 1Y ALL) — shared by every page. */
+export function RangeToggle({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
+  return <Segmented label="Range" value={value} onChange={onChange} options={RANGES.map(r => ({ value: r, label: r.toUpperCase() }))} />;
 }
 
 /** A small coloured change chip: green when the move is good, red when bad. Nothing when there is no change. */

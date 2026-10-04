@@ -44,6 +44,15 @@ export interface History {
 export interface ExpenseMonth { month: string; total: number; merchants: { key: string; name: string; total: number; count: number }[] }
 export interface Expenses { currentMonth: string; months: ExpenseMonth[] }
 export interface ExpenseRow { id: number; date: string; description: string; account: string; amount: number }
+export interface FlowTotals { in: number; out: number; net: number; moved: number }
+export interface CashFlow {
+  range: Range; from: string; accounts: { id: string; label: string }[]; totals: FlowTotals;
+  months: (FlowTotals & { month: string })[];
+  /** daily balance per bank (the snapshots are per bank), ILS */
+  balances: { series: { key: string; label: string }[]; points: { date: string; values: Record<string, number> }[] };
+}
+export interface FlowRow { id: number; date: string; description: string; account: string; amount: number }
+export interface CashFlowRows { month: string; in: FlowRow[]; out: FlowRow[]; moved: FlowRow[] }
 export interface ScrapeState {
   status: 'idle' | 'running' | 'pipeline' | 'done' | 'failed';
   companies: { company: string; status: string; error: string | null }[];
@@ -124,6 +133,9 @@ export const api = {
   expenses: () => request<Expenses>('/api/expenses?months=12'),
   expenseRows: (month: string, merchant?: string) =>
     request<ExpenseRow[]>(`/api/expenses/rows?month=${month}${merchant ? `&merchant=${encodeURIComponent(merchant)}` : ''}`),
+  cashFlow: (range: Range, account?: string) => request<CashFlow>(`/api/cashflow?range=${range}${account ? `&account=${encodeURIComponent(account)}` : ''}`),
+  cashFlowRows: (month: string, account?: string) =>
+    request<CashFlowRows>(`/api/cashflow/rows?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ''}`),
   scrape: () => request<ScrapeState>('/api/scrape'),
   startScrape: () => post<ScrapeState>('/api/scrape'),
   submitOtp: (code: string) => post<{ ok: true }>('/api/scrape/otp', { code }),

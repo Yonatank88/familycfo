@@ -9,6 +9,7 @@ import { answerReport, deleteReport, failInterrupted, listReports, processReport
 import { scrapeRunning, scrapeState, startScrape, submitOtp } from './scrapeJob.js';
 import { RANGES, expenseRowsOf, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
 import { priceChangeSince } from '../analytics/quotes.js';
+import { cashFlow, cashFlowRows } from '../analytics/cashflow.js';
 import { configuredSources, integrations } from '../analytics/integrations.js';
 import { configOwners } from '../analytics/owners.js';
 // which sources are configured and whether their credentials are filled — the values never leave configuredSources
@@ -71,6 +72,23 @@ app.get('/api/expenses/rows', async req => {
   const q = req.query as Record<string, string>;
   if (!/^\d{4}-\d{2}$/.test(q.month ?? '')) throw badRequest('month must be YYYY-MM');
   return expenseRowsOf(db, q.month, q.merchant || undefined);
+});
+
+// the bank accounts' money in / out per month (one account, or all), and their balances
+const accountOf = (v: unknown) => {
+  const a = String(v ?? '');
+  if (!a) return undefined;
+  if (!db.prepare(`SELECT 1 FROM accounts WHERE id = ? AND kind = 'bank'`).get(a)) throw badRequest('no such bank account');
+  return a;
+};
+app.get('/api/cashflow', async req => {
+  const q = req.query as Record<string, string>;
+  return cashFlow(db, rangeOf(q.range), accountOf(q.account));
+});
+app.get('/api/cashflow/rows', async req => {
+  const q = req.query as Record<string, string>;
+  if (!/^\d{4}-\d{2}$/.test(q.month ?? '')) throw badRequest('month must be YYYY-MM');
+  return cashFlowRows(db, q.month, accountOf(q.account));
 });
 
 // writes to /api/integrations/* (they edit accounts.json) only from the dashboard itself: a local Host and, when the

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChartNoAxesColumn, ChevronDown, LayoutGrid, Menu, Plug, Plus, RefreshCw } from 'lucide-react';
+import { ChartNoAxesColumn, ChevronDown, Landmark, LayoutGrid, Menu, PiggyBank, Plug, Plus, RefreshCw, TrendingUp } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { api, type Account, type ScrapeState, type Summary } from './api';
@@ -9,11 +9,16 @@ import { asOf, money, type Currency } from './format';
 import { AddReport } from './reports';
 import { Name, Parts, Segmented, StaleDot, button, primaryButton } from './ui';
 
-export type Page = '/' | '/integrations';
+export type Page = '/' | '/bank' | '/investments' | '/funds' | '/integrations';
 export const PAGES: { path: Page; label: string; icon: typeof LayoutGrid }[] = [
   { path: '/', label: 'Dashboard', icon: LayoutGrid },
+  { path: '/bank', label: 'Bank', icon: Landmark },
+  { path: '/investments', label: 'Investments', icon: TrendingUp },
+  { path: '/funds', label: 'Funds', icon: PiggyBank },
   { path: '/integrations', label: 'Integrations', icon: Plug },
 ];
+/** The sidebar group each page shows in detail. */
+const GROUP_PAGE: Record<(typeof ACCOUNT_GROUPS)[number]['key'], Page> = { bank: '/bank', investments: '/investments', funds: '/funds' };
 
 /** The scrape job's state, shared by the top bar and the Integrations page (a "Test connection" is a scrape too). */
 export function useScrape() {
@@ -77,21 +82,32 @@ function AccountRow({ a, currency, convert }: { a: Account; currency: Currency; 
   );
 }
 
-/** The accounts by group (Bank / Investments / Funds), each with its subtotal — the sidebar, and the mobile Accounts card. */
-export function AccountGroups({ accounts, currency, convert }: { accounts: Account[]; currency: Currency; convert: (n: number) => number }) {
+/**
+ * The accounts by group (Bank / Investments / Funds), each with its subtotal — the sidebar, and the mobile Accounts card.
+ * A group's name opens its page; the chevron folds it.
+ */
+export function AccountGroups({ accounts, currency, convert, navigate }: {
+  accounts: Account[]; currency: Currency; convert: (n: number) => number; navigate?: (p: Page) => void;
+}) {
   return (
     <div className="space-y-1">
       {ACCOUNT_GROUPS.map(g => {
         const rows = accounts.filter(a => accountGroup(a) === g.key);
         if (!rows.length) return null;
         const total = rows.reduce((s, a) => s + (a.valueIls ?? 0), 0);
+        const path = GROUP_PAGE[g.key];
         return (
-          <Collapsible key={g.key} defaultOpen>
-            <CollapsibleTrigger className="group flex min-h-9 w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-paper">
-              <ChevronDown className="size-3.5 shrink-0 transition-transform group-data-[state=closed]:-rotate-90" />
-              <span className="flex-1">{g.label}</span>
-              <span className="tabular-nums text-faint">{money(convert(total), currency)}</span>
-            </CollapsibleTrigger>
+          <Collapsible key={g.key} defaultOpen className="group">
+            <div className="flex min-h-9 w-full items-center rounded-lg text-[13px] font-medium text-muted hover:bg-paper">
+              <CollapsibleTrigger aria-label={`Fold ${g.label}`} className="flex h-9 w-7 shrink-0 items-center justify-center rounded-lg hover:text-ink">
+                <ChevronDown className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
+              </CollapsibleTrigger>
+              <a href={path} onClick={navigate ? e => { e.preventDefault(); navigate(path); } : undefined}
+                className="flex min-h-9 flex-1 items-center gap-1.5 py-1.5 pr-2 hover:text-ink">
+                <span className="flex-1">{g.label}</span>
+                <span className="tabular-nums text-faint">{money(convert(total), currency)}</span>
+              </a>
+            </div>
             <CollapsibleContent>
               <ul className="pb-1">{rows.map(a => <AccountRow key={a.id} a={a} currency={currency} convert={convert} />)}</ul>
             </CollapsibleContent>
@@ -126,7 +142,7 @@ function Sidebar({ page, navigate, summary, currency, convert }: {
       </nav>
       <div className="mx-5 my-4 border-t border-line" />
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-        <AccountGroups accounts={accounts} currency={currency} convert={convert} />
+        <AccountGroups accounts={accounts} currency={currency} convert={convert} navigate={navigate} />
       </div>
       {synced && (
         <div className="flex items-center gap-2 border-t border-line px-5 py-3 text-xs text-faint">
