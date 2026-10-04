@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Account, type ScrapeState, type Summary } from './api';
 import { asOf, money, type Currency } from './format';
 import { AddReport } from './reports';
@@ -11,28 +11,25 @@ export const PAGES: { path: Page; label: string; icon: typeof LayoutIcon }[] = [
   { path: '/integrations', label: 'Integrations', icon: PlugIcon },
 ];
 
-function useScrape() {
+/** The scrape job's state, shared by the top bar and the Integrations page (a "Test connection" is a scrape too). */
+export function useScrape() {
   const qc = useQueryClient();
-  const [state, setState] = useState<ScrapeState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { data: state = null } = useQuery({ queryKey: ['scrape'], queryFn: api.scrape,
+    refetchInterval: q => (q.state.data?.status === 'running' || q.state.data?.status === 'pipeline' ? 2000 : false) });
   const running = state?.status === 'running' || state?.status === 'pipeline';
-
-  useEffect(() => { api.scrape().then(setState).catch(() => {}); }, []);
+  // a run ended: everything it touched may have changed
+  const was = useRef(running);
   useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => {
-      api.scrape().then(s => {
-        setState(s);
-        if (s.status === 'done' || s.status === 'failed') qc.invalidateQueries();
-      }).catch(() => {});
-    }, 2000);
-    return () => clearInterval(t);
+    if (was.current && !running) qc.invalidateQueries({ predicate: q => q.queryKey[0] !== 'scrape' });
+    was.current = running;
   }, [running, qc]);
+  const set = (s: ScrapeState) => qc.setQueryData(['scrape'], s);
 
   return {
-    state, running, error,
-    start: () => { setError(null); api.startScrape().then(setState).catch(e => setError((e as Error).message)); },
-    otp: (code: string) => api.submitOtp(code).then(() => api.scrape().then(setState)).catch(e => setError((e as Error).message)),
+    state, running, error, set,
+    start: () => { setError(null); api.startScrape().then(set).catch(e => setError((e as Error).message)); },
+    otp: (code: string) => api.submitOtp(code).then(() => api.scrape().then(set)).catch(e => setError((e as Error).message)),
   };
 }
 

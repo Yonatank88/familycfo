@@ -36,6 +36,26 @@ export interface ScrapeState {
   companies: { company: string; status: string; error: string | null }[];
   otp: { company: string; requestedAt: string } | null;
   error: string | null;
+  test: { key: string; saved: boolean | null } | null;
+}
+
+export type IntegrationType = 'bank' | 'ibkr' | 'exchange' | 'wallets';
+export interface FieldSpec { name: string; label: string; secret: boolean; optional?: boolean }
+export interface Catalog {
+  banks: { id: string; name: string; kind: 'bank' | 'card'; fields: FieldSpec[] }[];
+  ibkr: { fields: FieldSpec[] };
+  exchange: { suggestions: string[]; fields: FieldSpec[] };
+  wallets: { fields: FieldSpec[]; networks: string[] };
+}
+export interface ConfigEntry {
+  key: string; type: IntegrationType; id: string; label: string; disabled: boolean; companyId?: string; exchange?: string;
+  /** filled or not, and "••••1234" — never the value */
+  fields: Record<string, { filled: boolean; masked: string | null }>;
+  networks?: string[]; wallets?: { address: string; label?: string }[]; linked?: boolean;
+}
+export interface Draft {
+  type: IntegrationType; companyId?: string; exchange?: string; fields: Record<string, string>;
+  networks?: string[]; wallets?: { address: string; label?: string }[];
 }
 
 export type ReportStatus = 'extracting' | 'needs_review' | 'applied' | 'superseded' | 'failed';
@@ -53,9 +73,9 @@ export interface ReportDetail extends Omit<ReportItem, 'products' | 'questions'>
   questions: Question[]; answers: Record<string, string>;
 }
 
-export type IntegrationStatus = 'ok' | 'failed' | 'stale' | 'not_configured';
+export type IntegrationStatus = 'ok' | 'failed' | 'stale' | 'not_configured' | 'disabled';
 export interface Integration {
-  id: string; label: string; kind: 'bank' | 'card' | 'investment'; status: IntegrationStatus;
+  id: string; key: string; label: string; kind: 'bank' | 'card' | 'investment'; status: IntegrationStatus;
   lastSuccessAt: string | null; lastAttemptAt: string | null; lastError: string | null;
   accounts: number; holdings: number | null; valueIls: number | null;
   /** the last 10, oldest first */
@@ -88,6 +108,16 @@ export const api = {
   startScrape: () => post<ScrapeState>('/api/scrape'),
   submitOtp: (code: string) => post<{ ok: true }>('/api/scrape/otp', { code }),
   integrations: () => request<Integrations>('/api/integrations'),
+  integrationConfig: () => request<{ catalog: Catalog; integrations: ConfigEntry[] }>('/api/integrations/config'),
+  addIntegration: (draft: Draft) => post<{ key: string }>('/api/integrations/config', draft),
+  editIntegration: (key: string, draft: Draft) => request<{ key: string }>(`/api/integrations/config/${encodeURIComponent(key)}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft) }),
+  disableIntegration: (key: string, disabled: boolean) => post<unknown>(`/api/integrations/config/${encodeURIComponent(key)}/disabled`, { disabled }),
+  removeIntegration: (key: string, keepData: boolean) =>
+    request<unknown>(`/api/integrations/config/${encodeURIComponent(key)}?keepData=${keepData}`, { method: 'DELETE' }),
+  testIntegration: (draft: Draft, key?: string) => post<ScrapeState>('/api/integrations/test', { key, draft }),
+  linkStart: (company: string) => post<{ ok: true }>(`/api/integrations/link/${company}/start`),
+  linkCode: (company: string, code: string) => post<{ ok: true }>(`/api/integrations/link/${company}/code`, { code }),
   reports: () => request<ReportItem[]>('/api/reports'),
   report: (id: number) => request<ReportDetail>(`/api/reports/${id}`),
   uploadReport: (file: File) => {

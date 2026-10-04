@@ -6,12 +6,16 @@ import { tmpdir } from 'os';
 import { basename, join } from 'path';
 import { getDb } from '../db/connection.js';
 import { answerReport, deleteReport, failInterrupted, listReports, processReport, registerReport, reportDetail } from '../reports/index.js';
-import { scrapeState, startScrape, submitOtp } from './scrapeJob.js';
+import { scrapeRunning, scrapeState, startScrape, submitOtp } from './scrapeJob.js';
 import { RANGES, expenseRowsOf, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
 import { priceChangeSince } from '../analytics/quotes.js';
 import { configuredSources, integrations } from '../analytics/integrations.js';
 // which sources are configured and whether their credentials are filled — the values never leave configuredSources
-import { loadConfig } from '../config.js';
+import { ACCOUNTS_FILE, loadConfig } from '../config.js';
+// add / edit / remove integrations: secrets come in, only masked values go out
+import { applyDraft, catalog, listIntegrations, onlyEntry, readConfigFile, removeEntry, setDisabled, writeConfigFile, type Draft } from '../integrations/manage.js';
+import { deleteSourceData } from '../integrations/data.js';
+import { LINKABLE, startLink, type LinkSession } from '../integrations/link.js';
 import { round } from '../util.js';
 
 const db = getDb();
@@ -64,11 +68,79 @@ app.get('/api/expenses/rows', async req => {
   return expenseRowsOf(db, q.month, q.merchant || undefined);
 });
 
+// writes to /api/integrations/* (they edit accounts.json) only from the dashboard itself: a local Host and, when the
+// browser sends one, a local Origin — another site open in the browser can't post here, nor reach it by DNS rebinding
+const WEB_PORT = Number(process.env.WEB_PORT ?? 5180);
+const LOCAL_ORIGINS = new Set([`http://127.0.0.1:${WEB_PORT}`, `http://localhost:${WEB_PORT}`, `http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`]);
+app.addHook('onRequest', async (req, reply) => {
+  if (!req.url.startsWith('/api/integrations/') || req.method === 'GET') return;
+  const host = (req.headers.host ?? '').replace(/:\d+$/, '');
+  const origin = req.headers.origin;
+  if (!['127.0.0.1', 'localhost'].includes(host) || (origin !== undefined && !LOCAL_ORIGINS.has(origin))) {
+    return reply.code(403).send({ error: 'only the local dashboard can change integrations' });
+  }
+});
+
 // every input source's health from source_runs, what it brings, and the reports (read-only)
 app.get('/api/integrations', async () => {
   let config = null;
   try { config = loadConfig(); } catch { /* no accounts.json: every source is "not configured" */ }
   return integrations(db, configuredSources(config));
+});
+
+// the integrations in accounts.json (secrets masked) and what can be added
+app.get('/api/integrations/config', async () => ({ catalog: catalog(), integrations: listIntegrations(readConfigFile(ACCOUNTS_FILE)) }));
+const draftOf = (body: unknown) => (body ?? {}) as Draft;
+const keyParam = (params: unknown) => decodeURIComponent(String((params as { key?: string }).key ?? ''));
+const save = (config: ReturnType<typeof readConfigFile>) => {
+  writeConfigFile(ACCOUNTS_FILE, config);
+  return { integrations: listIntegrations(config) };
+};
+app.post('/api/integrations/config', async req => {
+  const { config, key } = applyDraft(readConfigFile(ACCOUNTS_FILE), draftOf(req.body));
+  return { key, ...save(config) };
+});
+app.put('/api/integrations/config/:key', async req => {
+  const { config, key } = applyDraft(readConfigFile(ACCOUNTS_FILE), draftOf(req.body), keyParam(req.params));
+  return { key, ...save(config) };
+});
+app.post('/api/integrations/config/:key/disabled', async req =>
+  save(setDisabled(readConfigFile(ACCOUNTS_FILE), keyParam(req.params), !!(req.body as { disabled?: unknown })?.disabled)));
+// remove from accounts.json; its data stays unless keepData=false
+app.delete('/api/integrations/config/:key', async req => {
+  if (scrapeRunning()) throw Object.assign(new Error('a refresh is running'), { statusCode: 409 });
+  const { config, source, section } = removeEntry(readConfigFile(ACCOUNTS_FILE), keyParam(req.params));
+  const result = save(config);
+  if ((req.query as Record<string, string>).keepData === 'false') deleteSourceData(db, source, section);
+  return result;
+});
+// "Test connection": run that one integration with the form's values (an edit merges into the saved one); its settings
+// are written only when the run succeeds. Progress, the OTP prompt and the outcome come through /api/scrape.
+app.post('/api/integrations/test', async req => {
+  const body = (req.body ?? {}) as { key?: string; draft: Draft };
+  const { config, key } = applyDraft(readConfigFile(ACCOUNTS_FILE), body.draft ?? draftOf(null), body.key || undefined);
+  return startScrape(db, { key, config: onlyEntry(config, key), onSuccess: () => {
+    // re-apply on the file as it is now, so an edit made meanwhile isn't lost
+    const fresh = readConfigFile(ACCOUNTS_FILE);
+    const exists = listIntegrations(fresh).some(x => x.key === key);
+    writeConfigFile(ACCOUNTS_FILE, applyDraft(fresh, body.draft, exists ? key : undefined).config);
+  } });
+});
+// One Zero's SMS enrollment: send the code, then trade it for the idToken (saved, never returned)
+let link: { session: LinkSession; at: number } | null = null;
+app.post('/api/integrations/link/:company/start', async req => {
+  const companyId = LINKABLE[String((req.params as { company: string }).company).toLowerCase()];
+  if (!companyId) throw badRequest('not linkable');
+  link = { session: await startLink(companyId, ACCOUNTS_FILE), at: Date.now() };
+  return { ok: true };
+});
+app.post('/api/integrations/link/:company/code', async req => {
+  const code = String((req.body as { code?: unknown })?.code ?? '').trim();
+  if (!link || Date.now() - link.at > 10 * 60_000) throw Object.assign(new Error('send a new code first'), { statusCode: 409 });
+  if (!/^\d{4,8}$/.test(code)) throw badRequest('the code must be 4–8 digits');
+  await link.session.finish(code);
+  link = null;
+  return { ok: true };
 });
 
 // the scrape started from the UI: progress, and the bank's OTP request (the only writes)

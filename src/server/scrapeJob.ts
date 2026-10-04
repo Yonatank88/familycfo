@@ -1,5 +1,5 @@
 import type { DB } from '../db/connection.js';
-import { scrapeAll, type ScrapeProgress } from '../scraper.js';
+import { scrapeAll, type Config, type ScrapeProgress } from '../scraper.js';
 import { runPipeline } from '../pipeline.js';
 import { investmentSourceId, syncInvestments } from '../sync/index.js';
 // reads the bank credentials file; the credentials go only to the scraper and are never returned by the API
@@ -25,9 +25,11 @@ export interface ScrapeJobState {
   otp: { company: string; requestedAt: string } | null;
   newTransactions: number;
   error: string | null;
+  /** a "Test connection" run of one integration: saved = whether its settings were written (only when it succeeded) */
+  test: { key: string; saved: boolean | null } | null;
 }
 
-const idle = (): ScrapeJobState => ({ status: 'idle', startedAt: null, finishedAt: null, companies: [], otp: null, newTransactions: 0, error: null });
+const idle = (): ScrapeJobState => ({ status: 'idle', startedAt: null, finishedAt: null, companies: [], otp: null, newTransactions: 0, error: null, test: null });
 let state: ScrapeJobState = idle();
 let answerOtp: ((code: string) => void) | null = null;
 
@@ -44,18 +46,23 @@ const setCompany = (company: string, patch: Partial<ScrapeCompanyState>) => {
   state.companies = state.companies.map(c => (c.company === company ? { ...c, ...patch } : c));
 };
 
-export function startScrape(db: DB): ScrapeJobState {
+/**
+ * `test`: run only that config (one integration, from the Integrations page) and call `onSuccess` when it succeeded —
+ * which saves its settings; a failed test saves nothing.
+ */
+export function startScrape(db: DB, test?: { key: string; config: Config; onSuccess: () => void }): ScrapeJobState {
   if (scrapeRunning()) throw Object.assign(new Error('a scrape is already running'), { statusCode: 409 });
-  let config: ReturnType<typeof loadConfig>;
+  let config: Config;
   try {
-    config = loadConfig();
+    config = test?.config ?? loadConfig();
   } catch {
     throw Object.assign(new Error('the scraper configuration is missing or invalid (see accounts.example.json)'), { statusCode: 400 });
   }
   const only = process.env.SCRAPE_ONLY?.split(',').map(s => s.trim()).filter(Boolean);
   state = {
-    ...idle(), status: 'running', startedAt: new Date().toISOString(),
-    companies: [...(config.accounts ?? []).map(a => a.companyId), ...(config.investments ?? []).map(investmentSourceId)]
+    ...idle(), status: 'running', startedAt: new Date().toISOString(), test: test ? { key: test.key, saved: null } : null,
+    companies: [...(config.accounts ?? []).filter(a => !a.disabled).map(a => a.companyId),
+      ...(config.investments ?? []).filter(s => !s.disabled).map(investmentSourceId)]
       .filter(company => !only || only.includes(company))
       .map(company => ({ company, status: 'pending', newTransactions: 0, error: null })),
   };
@@ -86,7 +93,12 @@ export function startScrape(db: DB): ScrapeJobState {
     state.newTransactions = newIds.length;
     await runPipeline(db, { sources: results.map(r => ({ source: r.company, kind: r.kind, success: r.success })) });
     state.status = results.some(r => r.success) ? 'done' : 'failed';
-    if (state.status === 'failed') state.error = 'no bank was scraped';
+    if (state.status === 'failed') state.error = test ? state.companies[0]?.error ?? 'the connection failed' : 'no bank was scraped';
+    if (test && state.test) {
+      const ok = results.length > 0 && results.every(r => r.success);
+      if (ok) test.onSuccess();
+      state.test.saved = ok;
+    }
   })().catch(err => {
     console.error('Scrape job failed:', err);
     state.status = 'failed';

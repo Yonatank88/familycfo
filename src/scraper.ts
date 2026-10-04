@@ -37,6 +37,8 @@ function findChromePath(): string | undefined {
 interface AccountConfig {
   companyId: keyof typeof CompanyTypes;
   credentials: Record<string, string>;
+  /** kept in the file, skipped by every run */
+  disabled?: boolean;
 }
 
 export interface Config {
@@ -151,7 +153,7 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
   const summaries: ScrapeSummary[] = [];
 
   for (const account of config.accounts ?? []) {
-    if (only && !only.includes(account.companyId)) continue;
+    if (account.disabled || (only && !only.includes(account.companyId))) continue;
     console.log(`Scraping ${account.companyId}...`);
     hooks.onProgress?.({ type: 'start', company: account.companyId });
     const startedAt = new Date().toISOString();

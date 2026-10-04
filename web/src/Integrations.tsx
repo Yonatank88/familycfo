@@ -1,13 +1,16 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import IntegrationEditor, { type EditorMode } from './IntegrationEditor';
 import { api, type Integration, type IntegrationStatus, type Integrations as Data } from './api';
 import { ago, asOf, day, money, type Currency } from './format';
-import { Card } from './ui';
+import { Card, primaryButton } from './ui';
 
 const STATUS: Record<IntegrationStatus, { label: string; className: string; dot: string }> = {
   ok: { label: 'OK', className: 'bg-up/10 text-up', dot: 'bg-up' },
   failed: { label: 'Failed', className: 'bg-down/10 text-down', dot: 'bg-down' },
   stale: { label: 'Stale', className: 'bg-warn/15 text-warn', dot: 'bg-warn' },
   not_configured: { label: 'Not configured', className: 'bg-ink/[0.05] text-muted', dot: 'bg-faint' },
+  disabled: { label: 'Disabled', className: 'bg-ink/[0.05] text-faint', dot: 'bg-line' },
 };
 const KIND: Record<Integration['kind'], string> = { bank: 'Bank', card: 'Card', investment: 'Investments' };
 
@@ -54,7 +57,7 @@ function Runs({ runs }: { runs: Integration['runs'] }) {
   );
 }
 
-function SourceCard({ s, currency, convert, extra }: { s: Integration; currency: Currency; convert: (n: number) => number; extra?: React.ReactNode }) {
+function SourceCard({ s, currency, convert, onEdit }: { s: Integration; currency: Currency; convert: (n: number) => number; onEdit: () => void }) {
   return (
     <Card title={<span className="flex items-baseline gap-2">{s.label}<span className="text-xs font-normal text-faint">{KIND[s.kind]}</span></span>}
       action={<StatusBadge status={s.status} />}>
@@ -71,7 +74,9 @@ function SourceCard({ s, currency, convert, extra }: { s: Integration; currency:
       {s.lastError && (
         <p className="mt-3 rounded-lg bg-down/5 px-3 py-2 text-xs text-down" title={s.lastError}><span className="line-clamp-2 break-all">{s.lastError}</span></p>
       )}
-      {extra}
+      <div className="mt-3 flex justify-end">
+        <button type="button" onClick={onEdit} className="text-[13px] font-medium text-muted hover:text-accent">Edit</button>
+      </div>
     </Card>
   );
 }
@@ -113,12 +118,19 @@ export default function Integrations({ currency, convert, onOpenReport }: {
   currency: Currency; convert: (n: number) => number; onOpenReport: (id: number) => void;
 }) {
   const { data, error } = useQuery({ queryKey: ['integrations'], queryFn: api.integrations, refetchInterval: 30_000 });
+  const [editor, setEditor] = useState<EditorMode | null>(null);
   if (error) return <p className="text-sm text-down">{(error as Error).message}</p>;
   if (!data) return null;
   return (
-    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-      {data.sources.map(s => <SourceCard key={s.id} s={s} currency={currency} convert={convert} />)}
-      <ReportsCard r={data.reports} currency={currency} convert={convert} onOpenReport={onOpenReport} />
-    </div>
+    <>
+      <div className="mb-4 flex justify-end">
+        <button type="button" onClick={() => setEditor({ kind: 'add' })} className={primaryButton}>Add integration</button>
+      </div>
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        {data.sources.map(s => <SourceCard key={s.id} s={s} currency={currency} convert={convert} onEdit={() => setEditor({ kind: 'edit', key: s.key })} />)}
+        <ReportsCard r={data.reports} currency={currency} convert={convert} onOpenReport={onOpenReport} />
+      </div>
+      {editor && <IntegrationEditor mode={editor} onClose={() => setEditor(null)} />}
+    </>
   );
 }
