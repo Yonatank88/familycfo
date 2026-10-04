@@ -38,7 +38,7 @@ Requirements: **Node.js 20+** and npm, macOS or Linux.
    | Beinleumi / Massad / Otsar Hahayal / Union | `beinleumi` / `massad` / `otsarHahayal` / `union` | `username`, `password` |
    | Yahav | `yahav` | `username`, `nationalID`, `password` |
    | One Zero | `oneZero` | `email`, `password`, `phoneNumber` (`+972…`) — then `npm run link -- onezero`, see below |
-   | Isracard / American Express | `isracard` / `amex` | `id`, `card6Digits`, `password` |
+   | Isracard / American Express | `isracard` / `amex` | `id`, `card6Digits` (the card's **last** 6 digits), `password` |
    | Max | `max` | `username`, `password` |
    | Cal | `visaCal` | `username`, `password` |
 

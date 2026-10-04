@@ -14,7 +14,7 @@ export type IntegrationType = 'bank' | 'ibkr' | 'exchange' | 'wallets';
 export interface FieldSpec { name: string; label: string; secret: boolean; optional?: boolean }
 
 const LABELS: Record<string, string> = {
-  userCode: 'User code', username: 'Username', password: 'Password', id: 'ID number', num: 'Code', card6Digits: 'Card 6 digits',
+  userCode: 'User code', username: 'Username', password: 'Password', id: 'ID number', num: 'Code', card6Digits: 'Last 6 card digits',
   nationalID: 'National ID', email: 'Email', phoneNumber: 'Phone number (+972…)', token: 'Flex token', queryId: 'Flex query ID',
   apiKey: 'API key', secret: 'API secret',
 };
