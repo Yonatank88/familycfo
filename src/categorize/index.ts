@@ -6,6 +6,7 @@ import type { DB } from '../db/connection.js';
 import { runClaude } from '../ai/claude.js';
 import { findCategory } from '../ingest/classify.js';
 import { cleanMerchantName, merchantKey } from '../util.js';
+import { RULE_ONLY_CATEGORIES, applyCategoryRules } from './rules.js';
 
 /**
  * Fully automatic merchant categorisation, after the scraper-category step: every spend row (expense / refund) still
@@ -19,7 +20,7 @@ export const MODEL = 'claude-sonnet-5-5';
 export const BATCH_SIZE = 150;
 const MIN_CONFIDENCE = 0.5;
 /** the category a low-confidence or unusable answer lands in, the first that exists */
-const UNKNOWN_NAMES = ['לא ידוע', 'Other', 'Uncategorized', 'אחר'];
+const UNKNOWN_NAMES = ['Unknown', 'לא ידוע', 'Uncategorized', 'Other', 'אחר'];
 
 export interface MerchantInput { merchant: string; examples: string[]; hint: string | null; foreign: boolean }
 export interface CategoryInfo { name: string; parent: string | null; kind: string }
@@ -69,6 +70,7 @@ export interface CategorizeResult {
   asked: number;       // sent to the AI
   answered: number;    // answers cached this run
   rows: number;        // rows given a category
+  ruleRows: number;    // rows given a category by rule (src/categorize/rules.ts)
   aliases: number;     // scraper category names learned
   failed: string | null;
 }
@@ -77,19 +79,34 @@ export interface CategorizeOptions {
   categorizer?: MerchantCategorizer;
   /** re-ask every merchant whose rows aren't categorised by a person or the scraper, ignoring the cache */
   all?: boolean;
+  /** re-ask only the merchants the AI left in the unknown category */
+  unknown?: boolean;
   log?: (msg: string) => void;
 }
 
 interface Group { merchant: string; ids: number[]; names: Map<string, number>; hints: Set<string>; foreign: boolean }
 
 export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}): Promise<CategorizeResult> {
-  const { categorizer = claudeCategorizer, all = false, log = console.log } = opts;
-  const result: CategorizeResult = { merchants: 0, asked: 0, answered: 0, rows: 0, aliases: 0, failed: null };
+  const { categorizer = claudeCategorizer, all = false, unknown = false, log = console.log } = opts;
+  const result: CategorizeResult = { merchants: 0, asked: 0, answered: 0, rows: 0, ruleRows: 0, aliases: 0, failed: null };
 
-  // the rows: spend without a category — with --all also those a previous AI / rule answer categorised
+  // rules first: the rows they explain never reach the AI
+  result.ruleRows = applyCategoryRules(db).rows;
+
+  // only spend categories are offered: a merchant never changes what a row counts as (nor the rule-only ones)
+  const categories = (db.prepare(`
+    SELECT c.id, c.name, p.name AS parent, c.kind FROM categories c LEFT JOIN categories p ON p.id = c.parent_id
+    WHERE c.kind = 'expense' ORDER BY COALESCE(c.parent_id, c.id), c.parent_id IS NOT NULL, c.name
+  `).all() as { id: number; name: string; parent: string | null; kind: string }[]).filter(c => !RULE_ONLY_CATEGORIES.includes(c.name));
+  const byName = new Map(categories.map(c => [c.name, c.id]));
+  const unknownId = UNKNOWN_NAMES.map(n => byName.get(n)).find(id => id != null) ?? null;
+
+  // the rows: spend without a category — with --all also those a previous AI answer categorised, with --unknown
+  // those it left in the unknown category
+  const again = all ? `OR category_source = 'ai'` : unknown && unknownId != null ? `OR (category_source = 'ai' AND category_id = ${unknownId})` : '';
   const rows = db.prepare(`
     SELECT id, description, source_category, original_currency FROM transactions
-    WHERE kind IN ('expense', 'refund') AND (category_id IS NULL ${all ? `OR category_source IN ('ai', 'rule')` : ''})
+    WHERE kind IN ('expense', 'refund') AND (category_id IS NULL ${again})
   `).all() as { id: number; description: string; source_category: string | null; original_currency: string | null }[];
   if (!rows.length) return result;
 
@@ -107,17 +124,11 @@ export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}):
   }
   result.merchants = groups.size;
 
-  // only spend categories are offered: a merchant never changes what a row counts as
-  const categories = db.prepare(`
-    SELECT c.id, c.name, p.name AS parent, c.kind FROM categories c LEFT JOIN categories p ON p.id = c.parent_id
-    WHERE c.kind = 'expense' ORDER BY COALESCE(c.parent_id, c.id), c.parent_id IS NOT NULL, c.name
-  `).all() as { id: number; name: string; parent: string | null; kind: string }[];
-  const byName = new Map(categories.map(c => [c.name, c.id]));
-  const unknownId = UNKNOWN_NAMES.map(n => byName.get(n)).find(id => id != null) ?? null;
-
   const cached = new Map((db.prepare(`SELECT merchant, category_id, source FROM merchant_categories`).all() as
     { merchant: string; category_id: number | null; source: string }[]).map(c => [c.merchant, c]));
-  const toAsk = [...groups.values()].filter(g => all ? !cached.has(g.merchant) || cached.get(g.merchant)!.source === 'ai' : !cached.has(g.merchant));
+  const reask = (c: { category_id: number | null; source: string } | undefined) => !c
+    || (all && c.source === 'ai') || (unknown && c.source === 'ai' && (c.category_id === unknownId || c.category_id == null));
+  const toAsk = [...groups.values()].filter(g => reask(cached.get(g.merchant)));
 
   if (toAsk.length && categories.length) {
     const save = db.prepare(`INSERT INTO merchant_categories (merchant, category_id, confidence, source, model)
@@ -157,9 +168,9 @@ export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}):
     }
   }
 
-  // apply: every group with a cached category; only rows still uncategorised or categorised by AI / rule
+  // apply: every group with a cached category; only rows still uncategorised or categorised by the AI
   const apply = db.prepare(`UPDATE transactions SET category_id = ?, category_source = ?
-    WHERE id = ? AND (category_id IS NULL OR category_source IN ('ai', 'rule'))`);
+    WHERE id = ? AND (category_id IS NULL OR category_source = 'ai')`);
   const learn = db.prepare(`INSERT OR IGNORE INTO category_aliases (name, category_id) VALUES (?, ?)`);
   const hintAnswers = new Map<string, Set<number>>();
   db.transaction(() => {

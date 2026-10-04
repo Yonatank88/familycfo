@@ -1,10 +1,13 @@
 import type { DB } from '../db/connection.js';
 import { localDate } from './normalize.js';
-import { CARD_PAYMENT_PATTERN } from './classify.js';
+import { CARD_PAYMENT_PATTERN, FOREIGN_TRADE_PATTERN, FX_EXCHANGE_PATTERN, cardBillBody } from './classify.js';
 
-/** Which bank-row description pays which card company ("ויזה" on Hapoalim is the Isracard-issued Visa). */
+/**
+ * Which bank-row description (after the bank's prefix, `cardBillBody`) pays which card company ("ויזה" on Hapoalim is
+ * the Isracard-issued Visa; "כרטיסי אשראי לישראל" is Cal; "מקס איט פיננסים" is Max).
+ */
 export const BILL_COMPANY_PATTERNS: Record<string, RegExp> = {
-  visaCal: /^(כאל|ויזה)/,
+  visaCal: /^(כאל|ויזה|כרטיסי אשראי ל)/,
   isracard: /^(ישראכרט|ויזה)/,
   amex: /^אמריקן/,
   max: /^(מקס|לאומי קארד|לאומיקארד|לאומי מאסטרקרד|max)/i,
@@ -37,7 +40,7 @@ export function matchImmediateCardDebits(db: DB): { matched: number; debitCards:
   const used = new Set<number>();
   const pairs: { bankId: number; cardId: number; cardAccount: string }[] = [];
   for (const bank of bankRows.filter(b => CARD_PAYMENT_PATTERN.test(b.description.trim()))) {
-    const companies = Object.entries(BILL_COMPANY_PATTERNS).filter(([, p]) => p.test(bank.description.trim())).map(([c]) => c);
+    const companies = Object.entries(BILL_COMPANY_PATTERNS).filter(([, p]) => p.test(cardBillBody(bank.description))).map(([c]) => c);
     // Hapoalim puts the card's last 4 digits in the reference of these rows — the strongest signal
     const suffix = bank.bank_identifier && /^\d{4}$/.test(bank.bank_identifier) ? bank.bank_identifier : null;
     const bySuffix = suffix ? cards.filter(c => c.id.endsWith(`:${suffix}`)) : [];
@@ -103,7 +106,7 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
   db.transaction(() => {
     for (const bill of bills) {
       const companies = Object.entries(BILL_COMPANY_PATTERNS)
-        .filter(([, p]) => p.test(bill.description.trim())).map(([c]) => c);
+        .filter(([, p]) => p.test(cardBillBody(bill.description))).map(([c]) => c);
       const candidates = cards.filter(c => !companies.length || companies.includes(c.company));
       const billDay = Date.parse(localDate(bill.date));
       const amount = -bill.charged_amount;
@@ -171,6 +174,49 @@ export function matchInternalTransfers(db: DB): number {
       used.add(match.id);
       mark.run(out.id);
       mark.run(match.id);
+      pairs++;
+    }
+  })();
+  return pairs;
+}
+
+/**
+ * Currency changing hands inside one bank: an FX purchase / sale (`FX_EXCHANGE_PATTERN`) or a foreign-trade purchase
+ * (`FOREIGN_TRADE_PATTERN`) leaving one account, and the inflow it makes on an account of the same bank in another
+ * currency, within ±3 days and worth the same in ILS (±3%, at that day's rate; without a rate, only when it is the one
+ * candidate). Both legs become 'transfer' and are linked to each other. An FX purchase whose other leg isn't scraped is
+ * a transfer already (`kindFor`); a foreign-trade purchase with no leg stays spend (a wire abroad).
+ */
+export function matchCurrencyExchanges(db: DB): number {
+  const rows = db.prepare(`
+    SELECT t.id, t.account_id, a.company, COALESCE(a.currency, 'ILS') AS currency, t.date, t.description, t.charged_amount
+    FROM transactions t JOIN accounts a ON a.id = t.account_id
+    WHERE a.kind = 'bank' AND COALESCE(t.kind_source, 'auto') = 'auto'
+  `).all() as { id: number; account_id: string; company: string; currency: string; date: string; description: string; charged_amount: number }[];
+  const rateOn = db.prepare(`SELECT rate_to_ils FROM fx_rates WHERE currency = ? AND date <= ? ORDER BY date DESC LIMIT 1`).pluck();
+  const ils = (r: { currency: string; date: string; charged_amount: number }) => {
+    if (r.currency === 'ILS') return Math.abs(r.charged_amount);
+    const rate = rateOn.get(r.currency, localDate(r.date)) as number | undefined;
+    return rate == null ? null : Math.abs(r.charged_amount) * rate;
+  };
+  const outs = rows.filter(r => r.charged_amount < 0 && (FX_EXCHANGE_PATTERN.test(r.description) || FOREIGN_TRADE_PATTERN.test(r.description)));
+  const used = new Set<number>();
+  const link = db.prepare(`UPDATE transactions SET kind = 'transfer', kind_source = 'auto', matched_txn_id = ? WHERE id = ?`);
+  let pairs = 0;
+  db.transaction(() => {
+    for (const out of outs) {
+      const day = Date.parse(localDate(out.date));
+      const outIls = ils(out);
+      const near = rows.filter(r => r.charged_amount > 0 && !used.has(r.id) && r.company === out.company && r.currency !== out.currency
+        && Math.abs(Date.parse(localDate(r.date)) - day) <= 3 * DAY);
+      const scored = near.map(r => ({ r, value: ils(r) }));
+      const priced = outIls == null ? [] : scored.filter(x => x.value != null && Math.abs(x.value - outIls) <= outIls * 0.03);
+      const match = (priced.length ? priced : scored.length === 1 && scored[0].value == null ? scored : [])
+        .sort((a, b) => Math.abs(Date.parse(localDate(a.r.date)) - day) - Math.abs(Date.parse(localDate(b.r.date)) - day))[0];
+      if (!match) continue;
+      used.add(match.r.id);
+      link.run(match.r.id, out.id);
+      link.run(out.id, match.r.id);
       pairs++;
     }
   })();

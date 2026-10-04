@@ -6,6 +6,59 @@ import type Database from 'better-sqlite3';
  */
 export const BASELINE_VERSION = 100;
 
+/**
+ * The default categories' English names: [Hebrew name, Hebrew parent (null = top level), English name]. Children come
+ * before their parents so a child is found under its parent's Hebrew name.
+ */
+export const ENGLISH_CATEGORY_NAMES: [string, string | null, string][] = [
+  ['כרטיסים נטענים', 'אחר', 'Prepaid cards'], ['לא ידוע', 'אחר', 'Unknown'], ['קניות בחו"ל', 'אחר', 'Foreign purchases'],
+  ['אוכל מהיר', 'בילוי ומסעדות', 'Fast food'], ['מסעדות ובילויים', 'בילוי ומסעדות', 'Restaurants & nightlife'],
+  ['דיבידנדים', 'הכנסות', 'Dividends'], ['העברות חיצוניות', 'הכנסות', 'Incoming transfers'], ['משכורת', 'הכנסות', 'Salary'], ['עסק', 'הכנסות', 'Business'],
+  ['חסכון חודשי', 'השקעות וחסכונות', 'Monthly savings'], ['תיק השקעות', 'השקעות וחסכונות', 'Investment portfolio'],
+  ['בתי ספר וגנים', 'חינוך ומשפחה', 'Schools & kindergartens'], ['חוגים', 'חינוך ומשפחה', 'Classes'], ['תרבות ופנאי', 'חינוך ומשפחה', 'Culture & leisure'],
+  ['אינטרנט', 'חשבונות', 'Internet'], ['ארנונה', 'חשבונות', 'Municipal tax'], ['גז', 'חשבונות', 'Gas'], ['ועד בית', 'חשבונות', 'Building fees'],
+  ['חשמל', 'חשבונות', 'Electricity'], ['טלויזיה ובידור', 'חשבונות', 'TV & entertainment'], ['מים', 'חשבונות', 'Water'], ['סלולר', 'חשבונות', 'Mobile'],
+  ['חד פעמי', 'מזון וטואלטיקה', 'Disposables'], ['סופרמרקט', 'מזון וטואלטיקה', 'Supermarket'], ['פארם', 'מזון וטואלטיקה', 'Pharmacy'],
+  ['פירות וירקות', 'מזון וטואלטיקה', 'Fruit & vegetables'],
+  ['עמלות אשראי', 'מיסים, דוחות ועמלות', 'Card fees'], ['עמלות בנק', 'מיסים, דוחות ועמלות', 'Bank fees'], ['תשלום דוחות', 'מיסים, דוחות ועמלות', 'Fines'],
+  ['אטרקציות', 'נופש', 'Attractions'], ['טיסות', 'נופש', 'Flights'], ['כסף מזומן', 'נופש', 'Cash abroad'], ['מחייה ומזון', 'נופש', 'Food abroad'],
+  ['מלונות', 'נופש', 'Hotels'], ['שופינג', 'נופש', 'Shopping abroad'], ['תחבורה', 'נופש', 'Transport abroad'], ['תקשורת', 'נופש', 'Phone abroad'],
+  ['מנוי כושר', 'ספורט וטיפוח', 'Gym'], ['מספרה', 'ספורט וטיפוח', 'Hairdresser'], ['קוסמטיקה ואביזרי טיפוח', 'ספורט וטיפוח', 'Cosmetics'],
+  ['ביטוח רכב', 'רכב ותחבורה', 'Car insurance'], ['דלק וחשמל', 'רכב ותחבורה', 'Fuel & charging'], ['הלוואת רכב', 'רכב ותחבורה', 'Car loan'],
+  ['חניונים', 'רכב ותחבורה', 'Parking'], ['תחבורה ציבורית', 'רכב ותחבורה', 'Public transport'], ['תחזוקת רכב', 'רכב ותחבורה', 'Car maintenance'],
+  ['ניקיון', 'שיפוץ, תחזוקה וריהוט הבית', 'Cleaning'], ['ריהוט', 'שיפוץ, תחזוקה וריהוט הבית', 'Furniture'],
+  ['שיפוץ ואביזרים לבית', 'שיפוץ, תחזוקה וריהוט הבית', 'Renovation & housewares'], ['תיקונים', 'שיפוץ, תחזוקה וריהוט הבית', 'Repairs'],
+  ['מתנות ואירועים', 'תרומות ומתנות', 'Gifts & events'], ['תרומה', 'תרומות ומתנות', 'Donations'],
+  ['אופנה ביגוד והנעלה', null, 'Clothing & shoes'], ['אחר', null, 'Other'], ['ביטוחים', null, 'Insurance'], ['בילוי ומסעדות', null, 'Dining out'],
+  ['בעלי חיים', null, 'Pets'], ['בריאות', null, 'Health'], ['הכנסות', null, 'Income'], ['הלוואות ומשכנתא', null, 'Loans & mortgage'],
+  ['העברות כספים', null, 'Transfers'], ['השקעות וחסכונות', null, 'Savings & investments'], ['תשלום כרטיס אשראי', null, 'Card bill payments'],
+  ['חינוך ומשפחה', null, 'Education & family'], ['חשבונות', null, 'Bills'], ['חשמל ואלקטרוניקה', null, 'Electronics'], ['מזומן', null, 'Cash'],
+  ['מזון וטואלטיקה', null, 'Groceries & toiletries'], ['מיסים, דוחות ועמלות', null, 'Taxes, fines & fees'],
+  ['מנויים ושירותים דיגיטליים', null, 'Digital subscriptions'], ['נופש', null, 'Vacation'], ['ספורט וטיפוח', null, 'Sport & grooming'],
+  ['רכב ותחבורה', null, 'Car & transport'], ['שיפוץ, תחזוקה וריהוט הבית', null, 'Home'], ['תרומות ומתנות', null, 'Gifts & donations'],
+];
+
+/** Spend categories only rules assign (src/categorize/rules.ts), added at the top level. */
+const RULE_CATEGORIES = ['Transfers to people', 'Credit card (not itemised)'];
+
+/**
+ * Step 107: each default category (matched by its Hebrew name and parent, so a category the user made is left alone)
+ * takes its English name; the Hebrew name stays as an alias so scraper categories still resolve. A name already taken
+ * is skipped. Ids don't change, so merchant_categories and aliases stay valid.
+ */
+function englishCategoriesSql(): string {
+  const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
+  const parentIs = (parent: string | null) => parent == null ? 'parent_id IS NULL'
+    : `parent_id = (SELECT id FROM categories WHERE name = ${q(parent)} AND parent_id IS NULL)`;
+  const steps = ENGLISH_CATEGORY_NAMES.map(([he, parent, en]) => {
+    const target = `name = ${q(he)} AND ${parentIs(parent)} AND NOT EXISTS (SELECT 1 FROM categories WHERE name = ${q(en)})`;
+    return `INSERT OR IGNORE INTO category_aliases (name, category_id) SELECT name, id FROM categories WHERE ${target};\n`
+      + `UPDATE categories SET name = ${q(en)} WHERE ${target};`;
+  });
+  const added = RULE_CATEGORIES.map(n => `INSERT OR IGNORE INTO categories (name, parent_id, kind) VALUES (${q(n)}, NULL, 'expense');`);
+  return [...steps, ...added].join('\n');
+}
+
 /** Steps after the baseline, applied in order to a database that has the baseline and a prefix of these. */
 const STEPS: { version: number; name: string; sql: string }[] = [
   { version: 101, name: 'holdings.cost_basis', sql: `ALTER TABLE holdings ADD COLUMN cost_basis REAL` },
@@ -124,6 +177,7 @@ const STEPS: { version: number; name: string; sql: string }[] = [
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   ` },
+  { version: 107, name: 'categories in English', sql: englishCategoriesSql() },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 
@@ -336,3 +390,4 @@ const SCRAPER_CATEGORY_ALIASES: Record<string, string> = {
   'חשמל ומחשבים': 'חשמל ואלקטרוניקה', 'ריהוט ובית': 'ריהוט', 'עיצוב הבית': 'שיפוץ ואביזרים לבית', 'ספרים ודפוס': 'תרבות ופנאי',
   'אירועים': 'מתנות ואירועים', 'ילדים': 'חינוך ומשפחה', 'פנאי, בידור וספורט': 'תרבות ופנאי', 'פנאי בילוי': 'מסעדות ובילויים',
 };
+
