@@ -47,6 +47,20 @@ index 618bf63..726cb92 100644
  }
  async function fetchGraphql(url, query, variables = {}, extraHeaders = {}) {
    const result = await fetchPost(url, {
+diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
+index 4ffa0b2..6adefd4 100644
+--- a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
++++ b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
+@@ -186,7 +186,8 @@ class HapoalimScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+       loginUrl: `${this.baseUrl}/cgi-bin/poalwwwc?reqName=getLogonPage`,
+       fields: createLoginFields(credentials),
+       submitButtonSelector: '.login-btn',
+-      postAction: async () => (0, _navigation.waitForRedirect)(this.page),
++      // the SMS (OTP) step takes longer than the default 20 s; give the user 3 minutes
++      postAction: async () => (0, _navigation.waitForRedirect)(this.page, 180000),
+       possibleResults: getPossibleLoginResults(this.baseUrl)
+     };
+   }
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero-client-cert.js b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero-client-cert.js
 new file mode 100644
 index 0000000..5b3be4e
