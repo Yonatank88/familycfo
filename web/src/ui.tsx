@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ArrowDownRight, ArrowUpRight, ChevronRight } from 'lucide-react';
+import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, ChevronRight } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -185,3 +185,15 @@ export function SidePanel({ open = true, onClose, kicker, title, meta, children,
 
 export const button = 'inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink shadow-sm hover:bg-paper disabled:opacity-50';
 export const primaryButton = 'inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent/90 disabled:opacity-50';
+
+/** A sortable column header (TanStack Table): the label, and an arrow when sorted. */
+export function SortHead({ label, column, align = 'right' }: { label: string; column: { getIsSorted: () => false | 'asc' | 'desc'; toggleSorting: (desc?: boolean) => void }; align?: 'left' | 'right' }) {
+  const sorted = column.getIsSorted();
+  const Icon = sorted === 'asc' ? ArrowUp : ArrowDown;
+  return (
+    <button type="button" onClick={() => column.toggleSorting(sorted !== 'desc')}
+      className={cn('inline-flex min-h-9 items-center gap-1 uppercase tracking-wide hover:text-ink', align === 'right' && 'flex-row-reverse')}>
+      {label}<Icon className={cn('size-3', !sorted && 'invisible')} />
+    </button>
+  );
+}

@@ -37,7 +37,7 @@ export default function App() {
   const convert = (n: number) => (currency === 'USD' && usdNow ? n / usdNow : n);
 
   return (
-    <Layout page={page} navigate={navigate} summary={summary.data} currency={currency} setCurrency={setCurrency} convert={convert}
+    <Layout page={page} navigate={navigate} summary={summary.data} currency={currency} setCurrency={setCurrency}
       toReview={toReview.length} onReview={() => toReview[0] && setOpenReport(toReview[0].id)} onAddIntegration={() => setEditor({ kind: 'add' })}>
       {summary.error && <p className="pb-4 text-sm text-down">{(summary.error as Error).message}</p>}
       {page === '/integrations'
@@ -48,7 +48,7 @@ export default function App() {
             ? <Investments range={range} setRange={setRange} currency={currency} convert={convert} />
             : page === '/funds'
               ? <Funds range={range} setRange={setRange} currency={currency} convert={convert} />
-              : <Dashboard summary={summary.data} range={range} setRange={setRange} currency={currency} convert={convert} />}
+              : <Dashboard summary={summary.data} currency={currency} convert={convert} navigate={navigate} />}
       {openReport != null && <ReportPanel id={openReport} onClose={() => setOpenReport(null)} />}
       {editor && <IntegrationEditor mode={editor} onClose={() => setEditor(null)} />}
     </Layout>

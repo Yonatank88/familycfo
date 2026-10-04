@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChartNoAxesColumn, ChevronDown, Landmark, LayoutGrid, Menu, PiggyBank, Plug, Plus, RefreshCw, TrendingUp } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ChartNoAxesColumn, Landmark, LayoutGrid, Menu, PiggyBank, Plug, Plus, RefreshCw, TrendingUp } from 'lucide-react';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
-import { api, type Account, type ScrapeState, type Summary } from './api';
-import { accountGroup, ACCOUNT_GROUPS, accountSub } from './colors';
-import { asOf, money, type Currency } from './format';
+import { api, type ScrapeState, type Summary } from './api';
+import { asOf, type Currency } from './format';
 import { AddReport } from './reports';
-import { Name, Parts, Segmented, StaleDot, button, primaryButton } from './ui';
+import { Segmented, button, primaryButton } from './ui';
 
-export type Page = '/' | '/bank' | '/investments' | '/funds' | '/integrations';
+export type Page = '/' | '/bank' | '/expenses' | '/investments' | '/funds' | '/integrations';
 export const PAGES: { path: Page; label: string; icon: typeof LayoutGrid }[] = [
   { path: '/', label: 'Dashboard', icon: LayoutGrid },
   { path: '/bank', label: 'Bank', icon: Landmark },
@@ -17,8 +15,6 @@ export const PAGES: { path: Page; label: string; icon: typeof LayoutGrid }[] = [
   { path: '/funds', label: 'Funds', icon: PiggyBank },
   { path: '/integrations', label: 'Integrations', icon: Plug },
 ];
-/** The sidebar group each page shows in detail. */
-const GROUP_PAGE: Record<(typeof ACCOUNT_GROUPS)[number]['key'], Page> = { bank: '/bank', investments: '/investments', funds: '/funds' };
 
 /** The scrape job's state, shared by the top bar and the Integrations page (a "Test connection" is a scrape too). */
 export function useScrape() {
@@ -64,86 +60,29 @@ function ScrapeStrip({ scrape }: { scrape: ReturnType<typeof useScrape> }) {
   );
 }
 
-function AccountRow({ a, currency, convert }: { a: Account; currency: Currency; convert: (n: number) => number }) {
-  const sub = accountSub(a);
-  return (
-    <li className="flex items-start gap-2 py-1.5 pl-7 pr-2 text-[13px]">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="break-words text-ink"><Name text={a.label} /></span>
-          {a.stale && <StaleDot lastSuccess={asOf(a.lastSuccessAt)} />}
-        </div>
-        {sub.length > 0 && <div className="text-xs text-faint"><Parts parts={sub} /></div>}
-      </div>
-      <span className={`shrink-0 tabular-nums ${a.fxMissing ? 'text-warn' : 'text-muted'}`}>
-        {a.valueIls == null ? '—' : money(convert(a.valueIls), currency)}
-      </span>
-    </li>
-  );
-}
-
-/**
- * The accounts by group (Bank / Investments / Funds), each with its subtotal — the sidebar, and the mobile Accounts card.
- * A group's name opens its page; the chevron folds it.
- */
-export function AccountGroups({ accounts, currency, convert, navigate }: {
-  accounts: Account[]; currency: Currency; convert: (n: number) => number; navigate?: (p: Page) => void;
-}) {
-  return (
-    <div className="space-y-1">
-      {ACCOUNT_GROUPS.map(g => {
-        const rows = accounts.filter(a => accountGroup(a) === g.key);
-        if (!rows.length) return null;
-        const total = rows.reduce((s, a) => s + (a.valueIls ?? 0), 0);
-        const path = GROUP_PAGE[g.key];
-        return (
-          <Collapsible key={g.key} defaultOpen className="group">
-            <div className="flex min-h-9 w-full items-center rounded-lg text-[13px] font-medium text-muted hover:bg-paper">
-              <CollapsibleTrigger aria-label={`Fold ${g.label}`} className="flex h-9 w-7 shrink-0 items-center justify-center rounded-lg hover:text-ink">
-                <ChevronDown className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
-              </CollapsibleTrigger>
-              <a href={path} onClick={navigate ? e => { e.preventDefault(); navigate(path); } : undefined}
-                className="flex min-h-9 flex-1 items-center gap-1.5 py-1.5 pr-2 hover:text-ink">
-                <span className="flex-1">{g.label}</span>
-                <span className="tabular-nums text-faint">{money(convert(total), currency)}</span>
-              </a>
-            </div>
-            <CollapsibleContent>
-              <ul className="pb-1">{rows.map(a => <AccountRow key={a.id} a={a} currency={currency} convert={convert} />)}</ul>
-            </CollapsibleContent>
-          </Collapsible>
-        );
-      })}
-    </div>
-  );
-}
-
-function Sidebar({ page, navigate, summary, currency, convert }: {
-  page: Page; navigate: (p: Page) => void; summary?: Summary; currency: Currency; convert: (n: number) => number;
-}) {
+function Sidebar({ page, navigate, summary }: { page: Page; navigate: (p: Page) => void; summary?: Summary }) {
   const accounts = summary?.accounts ?? [];
   const synced = accounts.map(a => a.lastSuccessAt).filter((x): x is string => !!x).sort().at(-1) ?? null;
   const stale = accounts.some(a => a.stale);
+  const link = (p: (typeof PAGES)[number]) => (
+    <a key={p.path} href={p.path} onClick={e => { e.preventDefault(); navigate(p.path); }}
+      aria-current={page === p.path ? 'page' : undefined}
+      className={`flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium ${
+        page === p.path ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-paper hover:text-ink'}`}>
+      <p.icon className="size-4" />{p.label}
+    </a>
+  );
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-14 items-center gap-2 px-5">
         <span className="flex size-7 items-center justify-center rounded-lg bg-accent text-white"><ChartNoAxesColumn className="size-4" /></span>
         <span className="text-[15px] font-semibold tracking-tight text-ink">FamilyCFO</span>
       </div>
-      <nav className="space-y-0.5 px-3 pt-2">
-        {PAGES.map(p => (
-          <a key={p.path} href={p.path} onClick={e => { e.preventDefault(); navigate(p.path); }}
-            aria-current={page === p.path ? 'page' : undefined}
-            className={`flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium ${
-              page === p.path ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-paper hover:text-ink'}`}>
-            <p.icon className="size-4" />{p.label}
-          </a>
-        ))}
+      <nav className="flex-1 px-3 pt-2">
+        <div className="space-y-0.5">{PAGES.filter(p => p.path !== '/integrations').map(link)}</div>
+        <div className="mx-2 my-3 border-t border-line" />
+        <div className="space-y-0.5">{PAGES.filter(p => p.path === '/integrations').map(link)}</div>
       </nav>
-      <div className="mx-5 my-4 border-t border-line" />
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-        <AccountGroups accounts={accounts} currency={currency} convert={convert} navigate={navigate} />
-      </div>
       {synced && (
         <div className="flex items-center gap-2 border-t border-line px-5 py-3 text-xs text-faint">
           <span className={`h-1.5 w-1.5 rounded-full ${stale ? 'bg-warn' : 'bg-up'}`} />
@@ -154,9 +93,9 @@ function Sidebar({ page, navigate, summary, currency, convert }: {
   );
 }
 
-export function Layout({ page, navigate, summary, currency, setCurrency, convert, toReview, onReview, onAddIntegration, children }: {
+export function Layout({ page, navigate, summary, currency, setCurrency, toReview, onReview, onAddIntegration, children }: {
   page: Page; navigate: (p: Page) => void; summary?: Summary; currency: Currency; setCurrency: (c: Currency) => void;
-  convert: (n: number) => number; toReview: number; onReview: () => void; onAddIntegration: () => void; children: ReactNode;
+  toReview: number; onReview: () => void; onAddIntegration: () => void; children: ReactNode;
 }) {
   const scrape = useScrape();
   const [drawer, setDrawer] = useState(false);
@@ -166,13 +105,13 @@ export function Layout({ page, navigate, summary, currency, setCurrency, convert
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-64 shrink-0 border-r border-line bg-surface lg:block">
         <div className="sticky top-0 h-screen">
-          <Sidebar page={page} navigate={go} summary={summary} currency={currency} convert={convert} />
+          <Sidebar page={page} navigate={go} summary={summary} />
         </div>
       </aside>
       <Sheet open={drawer} onOpenChange={setDrawer}>
         <SheetContent side="left" className="w-72 max-w-[85vw] gap-0 border-line bg-surface p-0 lg:hidden">
           <SheetTitle className="sr-only">Menu</SheetTitle>
-          <Sidebar page={page} navigate={go} summary={summary} currency={currency} convert={convert} />
+          <Sidebar page={page} navigate={go} summary={summary} />
         </SheetContent>
       </Sheet>
       <div className="min-w-0 flex-1">

@@ -3,9 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table';
 import { api, type Holding, type Range } from './api';
 import { OTHER, TYPE_COLORS, TYPE_LABELS } from './colors';
-import { SortHead } from './Dashboard';
 import { day, money, pct, quantity, signedMoney, signedPct, type Currency } from './format';
-import { Card, Name, Parts, RangeToggle, Tag } from './ui';
+import { Card, Name, Parts, RangeToggle, SortHead, Tag } from './ui';
 import { cn } from '@/lib/utils';
 
 const tone = (n: number | null | undefined) => (n == null || n === 0 ? 'text-muted' : n > 0 ? 'text-up' : 'text-down');
