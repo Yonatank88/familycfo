@@ -20,6 +20,8 @@ export interface SyncedPosition {
   assetClass: AssetClass;
   /** the source's own price per unit: the price when there's no quote, and a check that the quote is the same thing */
   price: number | null;
+  /** what the position cost in total, in `currency` — only sources that report it (IBKR) */
+  costBasis?: number | null;
 }
 
 export interface SyncedAccount {
@@ -78,10 +80,10 @@ export async function syncHoldings(db: DB, sourceId: string, accounts: SyncedAcc
 
   const find = db.prepare(`SELECT id FROM holdings WHERE source = ? AND symbol = ?`).pluck();
   const insert = db.prepare(`INSERT INTO holdings (source, symbol, name, quantity, currency, asset_class, manual_price,
-    manual_price_date, broker, synced_at)
-    VALUES (@source, @symbol, @name, @quantity, @currency, @assetClass, @manualPrice, @manualDate, @broker, @now)`);
+    manual_price_date, broker, cost_basis, synced_at)
+    VALUES (@source, @symbol, @name, @quantity, @currency, @assetClass, @manualPrice, @manualDate, @broker, @costBasis, @now)`);
   const update = db.prepare(`UPDATE holdings SET name = COALESCE(@name, name), quantity = @quantity, currency = @currency,
-    asset_class = @assetClass, manual_price = @manualPrice, manual_price_date = @manualDate, broker = @broker, archived = 0,
+    asset_class = @assetClass, manual_price = @manualPrice, manual_price_date = @manualDate, broker = @broker, cost_basis = @costBasis, archived = 0,
     synced_at = @now, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id`);
   const seen: number[] = [];
@@ -91,7 +93,7 @@ export async function syncHoldings(db: DB, sourceId: string, accounts: SyncedAcc
       const values = {
         symbol, name: p.name ?? null, quantity: p.quantity, currency: price.currency, assetClass: p.assetClass,
         manualPrice: price.live ? null : price.price, manualDate: price.live ? null : day,
-        broker: account.broker, source: account.source, now,
+        broker: account.broker, source: account.source, costBasis: p.costBasis ?? null, now,
       };
       if (!price.live) result.manual++;
       const id = find.get(account.source, symbol) as number | undefined;

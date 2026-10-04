@@ -48,6 +48,17 @@ describe('snapshots', () => {
     expect(summary(db, '2026-05-01')).toMatchObject({ netWorth: 435, bank: 0, investments: 735, cardsOwed: 300 });
   });
 
+  it('gain since purchase comes from the cost basis, in the holding currency', () => {
+    const db = testDb();
+    rate(db, '2026-05-01', 'USD', 3.5);
+    addHolding(db, { source: 'ibkr:U1', symbol: 'VOO', quantity: 10, currency: 'USD', assetClass: 'stock', price: 500 });
+    addHolding(db, { source: 'kraken:spot', symbol: 'ETH-USD', quantity: 1, currency: 'USD', assetClass: 'crypto', price: 2000 });
+    db.prepare(`UPDATE holdings SET cost_basis = 4000 WHERE symbol = 'VOO'`).run();
+    const [eth, voo] = (db.prepare(`SELECT * FROM holdings ORDER BY symbol`).all() as Record<string, unknown>[]).map(r => valueHolding(db, r, '2026-05-01'));
+    expect(voo).toMatchObject({ gain: 1000, gainIls: 3500, gainPct: 25 });
+    expect(eth).toMatchObject({ gain: null, gainIls: null, gainPct: null });
+  });
+
   it('flags a holding with no exchange rate instead of valuing it 1:1', () => {
     const db = testDb();
     addHolding(db, { source: 'ibkr:U1', symbol: 'VOD.L', quantity: 10, currency: 'GBP', assetClass: 'stock', price: 1 });
@@ -117,6 +128,20 @@ describe('database', () => {
     old.exec(`CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT); INSERT INTO schema_version VALUES (16, 'x')`);
     old.close();
     expect(() => openDb(path)).toThrow(/unsupported database schema/);
+    rmSync(path, { force: true });
+  });
+
+  it('upgrades a baseline database with the later steps', () => {
+    const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-base-${process.pid}.db`;
+    openDb(path).close();
+    const db = new Database(path);
+    expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101]);
+    db.prepare(`DELETE FROM schema_version WHERE version = 101`).run();
+    db.exec(`ALTER TABLE holdings DROP COLUMN cost_basis`);
+    db.close();
+    const reopened = openDb(path);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101]);
+    reopened.close();
     rmSync(path, { force: true });
   });
 });

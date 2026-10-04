@@ -192,6 +192,7 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
             <th className={`${th} text-right`}>Value</th>
             <th className={`${th} text-right max-sm:hidden`}>Weight</th>
             <th className={`${th} text-right`}>Change</th>
+            <th className={`${th} text-right`}>Gain</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-line/70 border-t border-line/70">
@@ -206,6 +207,14 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
               </td>
               <td className="px-4 py-2.5 text-right tabular-nums text-muted max-sm:hidden">{pct(h.pctOfInvestments)}</td>
               <td className={`px-4 py-2.5 text-right tabular-nums ${tone(h.changePct)}`}>{signedPct(h.changePct)}</td>
+              <td className={`px-4 py-2.5 text-right tabular-nums ${tone(h.gainPct)}`}>
+                {h.gainIls == null ? <span className="text-faint">—</span> : (
+                  <>
+                    <div>{signedMoney(convert(h.gainIls), currency)}</div>
+                    <div className="text-xs">{signedPct(h.gainPct)}</div>
+                  </>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

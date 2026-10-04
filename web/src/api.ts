@@ -10,6 +10,8 @@ export interface Holding {
   id: number; symbol: string; name: string; source: string; sourceLabel: string; assetClass: string;
   quantity: number; currency: string; price: number | null; value: number; valueIls: number | null;
   pctOfInvestments: number | null; changePct: number | null; fxMissing: boolean;
+  /** since purchase, from the source's cost basis (IBKR only) */
+  gainIls: number | null; gainPct: number | null;
 }
 export interface Slice { key: string; label: string; value: number }
 export interface Summary {

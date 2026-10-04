@@ -68,6 +68,7 @@ export function parseFlexStatement(raw: any, cfg: IbkrSource): SyncedAccount[] {
         assetClass: ibkrAssetClass(p.assetCategory),
         // per unit, multiplier included (an option's price is per share, its value per contract)
         price: value != null && quantity ? value / quantity : num(p.markPrice),
+        costBasis: num(p.costBasisMoney),
       };
     });
     const cash = new Map<string, number>();

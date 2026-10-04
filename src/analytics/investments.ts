@@ -18,6 +18,10 @@ export interface HoldingValue {
   value: number;
   /** null when there is no exchange rate for its currency — it's left out of totals, never valued 1:1 */
   valueIls: number | null;
+  /** value − cost basis, when the source reports a cost in the same currency (IBKR); null otherwise */
+  gain: number | null;
+  gainIls: number | null;
+  gainPct: number | null;
 }
 
 type Row = Record<string, any>;
@@ -37,11 +41,16 @@ export function valueHolding(db: DB, h: Row, asOf = today()): HoldingValue {
   const currency: string = (manual ? h.currency : h.quote_currency ?? h.currency) ?? 'ILS';
   const rate = rateToIls(db, currency, asOf);
   const value = (price ?? 0) * h.quantity;
+  // the cost is in the holding's own currency; a quote in another currency can't be compared with it
+  const cost: number | null = h.cost_basis != null && price != null && currency === (h.currency ?? currency) ? h.cost_basis : null;
+  const gain = cost == null ? null : value - cost;
   return {
     id: h.id, source: String(h.source).split(':')[0], symbol: h.symbol, name: h.name || h.quote_name || h.symbol,
     quantity: h.quantity, currency, assetClass: h.asset_class,
     price, priceSource: manual ? 'source' : price != null ? 'quote' : 'none',
     value: round(value), valueIls: rate == null ? null : round(value * rate),
+    gain: gain == null ? null : round(gain), gainIls: gain == null || rate == null ? null : round(gain * rate),
+    gainPct: gain == null || !cost ? null : round((gain / Math.abs(cost)) * 100),
   };
 }
 

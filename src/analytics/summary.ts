@@ -197,6 +197,7 @@ export function summary(db: DB, asOf = today()) {
       .map(h => ({
         id: h.id, symbol: h.symbol, name: h.name, source: h.source, sourceLabel: sourceLabel(h.source), assetClass: h.assetClass,
         quantity: h.quantity, currency: h.currency, price: h.price, value: h.value, valueIls: h.valueIls, fxMissing: h.valueIls == null,
+        gainIls: h.gainIls, gainPct: h.gainPct,
         pctOfInvestments: invested && h.valueIls != null ? round((h.valueIls / invested) * 100) : null,
       })),
     allocation: {

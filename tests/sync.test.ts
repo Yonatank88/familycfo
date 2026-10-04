@@ -29,7 +29,7 @@ describe('asset classes', () => {
     const raw = { FlexQueryResponse: { FlexStatements: { FlexStatement: {
       accountId: 'U1', toDate: '20261002',
       OpenPositions: { OpenPosition: [
-        { assetCategory: 'STK', symbol: 'VOO', listingExchange: 'ARCA', currency: 'USD', position: '10', positionValue: '5000', levelOfDetail: 'SUMMARY' },
+        { assetCategory: 'STK', symbol: 'VOO', listingExchange: 'ARCA', currency: 'USD', position: '10', positionValue: '5000', costBasisMoney: '4200', levelOfDetail: 'SUMMARY' },
         { assetCategory: 'CRYPTO', symbol: 'BTC', currency: 'USD', position: '0.1', positionValue: '6000', levelOfDetail: 'SUMMARY' },
       ] },
       CashReport: { CashReportCurrency: [{ currency: 'BASE_SUMMARY', endingCash: '999' }, { currency: 'USD', endingCash: '250' }] },
@@ -40,6 +40,7 @@ describe('asset classes', () => {
       ['VOO', 'VOO', 'stock'], ['BTC', 'BTC-USD', 'crypto'], ['CASH.USD', null, 'broker_cash'],
     ]);
     expect(account.positions[2]).toMatchObject({ quantity: 250, price: 1, name: 'Cash USD' });
+    expect(account.positions.map(p => p.costBasis ?? null)).toEqual([4200, null, null]);
   });
 
   it('prices exchange balances from tickers; stablecoins are never assumed to be $1', () => {

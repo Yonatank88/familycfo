@@ -6,6 +6,21 @@ import type Database from 'better-sqlite3';
  */
 export const BASELINE_VERSION = 100;
 
+/** Steps after the baseline, applied in order to a database that has the baseline and a prefix of these. */
+const STEPS: { version: number; name: string; sql: string }[] = [
+  { version: 101, name: 'holdings.cost_basis', sql: `ALTER TABLE holdings ADD COLUMN cost_basis REAL` },
+];
+const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
+
+function applySteps(db: Database.Database, have: number[]): void {
+  db.transaction(() => {
+    for (const step of STEPS.filter(s => !have.includes(s.version))) {
+      db.exec(step.sql);
+      db.prepare(`INSERT INTO schema_version (version, name) VALUES (?, ?)`).run(step.version, step.name);
+    }
+  })();
+}
+
 const BASELINE = `
   CREATE TABLE accounts (
     id TEXT PRIMARY KEY,                 -- company:accountNumber
@@ -142,8 +157,8 @@ export function ensureSchema(db: Database.Database): void {
   const hasVersions = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'`).get();
   if (hasVersions) {
     const versions = db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all() as number[];
-    if (versions.length === 1 && versions[0] === BASELINE_VERSION) return;
-    throw new Error(`unsupported database schema (versions ${versions.join(', ') || 'none'}; expected ${BASELINE_VERSION}) — `
+    if (versions.length && versions.every((v, i) => v === EXPECTED[i])) return applySteps(db, versions);
+    throw new Error(`unsupported database schema (versions ${versions.join(', ') || 'none'}; expected ${EXPECTED.join(', ')}) — `
       + `this is not a FamilyCFO finance database. Point BANK_DB at a new file (default finance.db).`);
   }
   const tables = db.prepare(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).pluck().get() as number;
@@ -154,6 +169,7 @@ export function ensureSchema(db: Database.Database): void {
     db.exec(`CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
     db.prepare(`INSERT INTO schema_version (version, name) VALUES (?, 'baseline')`).run(BASELINE_VERSION);
   })();
+  applySteps(db, [BASELINE_VERSION]);
 }
 
 /** The default category tree, with the card companies' own category names as aliases (Hebrew: they match scraped data). */
