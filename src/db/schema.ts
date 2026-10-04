@@ -73,6 +73,35 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     ALTER TABLE holdings_new RENAME TO holdings;
     CREATE INDEX idx_holdings_symbol ON holdings(symbol);
   ` },
+  { version: 103, name: 'holdings.asset_class mutual_fund', sql: `
+    -- holdings.asset_class gains mutual funds (קרנות נאמנות) from imported statements: a table rebuild, every row kept
+    CREATE TABLE holdings_new (
+      id INTEGER PRIMARY KEY,
+      source TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      name TEXT,
+      quantity REAL NOT NULL,
+      currency TEXT,
+      asset_class TEXT NOT NULL CHECK (asset_class IN ('stock','crypto','stablecoin','broker_cash',
+        'pension','study_fund','provident_fund','deposit','other','mutual_fund')),
+      broker TEXT,
+      manual_price REAL,
+      manual_price_date TEXT,
+      archived INTEGER NOT NULL DEFAULT 0,
+      synced_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      cost_basis REAL,
+      UNIQUE (source, symbol)
+    );
+    INSERT INTO holdings_new (id, source, symbol, name, quantity, currency, asset_class, broker, manual_price, manual_price_date,
+      archived, synced_at, created_at, updated_at, cost_basis)
+    SELECT id, source, symbol, name, quantity, currency, asset_class, broker, manual_price, manual_price_date,
+      archived, synced_at, created_at, updated_at, cost_basis FROM holdings;
+    DROP TABLE holdings;
+    ALTER TABLE holdings_new RENAME TO holdings;
+    CREATE INDEX idx_holdings_symbol ON holdings(symbol);
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 
@@ -205,7 +234,7 @@ const BASELINE = `
   );
   CREATE INDEX idx_source_runs ON source_runs(source, id);
 
-  -- value per day, source and bucket (bank, cards_owed, stock, crypto, stablecoin, broker_cash), in ILS
+  -- value per day, source and bucket (bank, cards_owed, or a holdings asset class), in ILS
   CREATE TABLE daily_snapshots (
     date TEXT NOT NULL,
     source TEXT NOT NULL,

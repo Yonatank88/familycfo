@@ -202,10 +202,35 @@ describe('reports', () => {
     expect(retry).toMatchObject({ duplicate: false, report: { status: 'applied' } });
   });
 
+  it('a statement\'s mutual funds become Funds holdings by fund number; its other securities stay stocks', async () => {
+    const fund = (accountNumber: string, name: string, balance: number) =>
+      product({ provider: 'הראל קרנות נאמנות', productType: 'mutual_fund', accountNumber, name, balance, liquidityDate: null });
+    const statement = report({ issuer: 'בנק לדוגמה', reportType: 'statement', statedTotal: 60_000, products: [
+      fund('5111111', 'הראל מחקה ת"א 125', 30_000), fund('5122222', 'הראל כספית שקלית', 20_000),
+      product({ provider: 'בנק לדוגמה', productType: 'brokerage', accountNumber: '12-345-678901', name: 'תיק ניירות ערך', balance: 10_000, liquidityDate: null }),
+    ] });
+    await importReport(db, file(), { extract: ai(statement) });
+    expect(holdings(db).map(h => [h.source, h.symbol, h.asset_class])).toEqual([
+      ['report:בנק-לדוגמה:12345678901', 'Brokerage ••8901', 'stock'],
+      ['report:הראל-קרנות-נאמנות:5111111', 'Fund ••1111', 'mutual_fund'],
+      ['report:הראל-קרנות-נאמנות:5122222', 'Fund ••2222', 'mutual_fund'],
+    ]);
+    expect(snaps(db)).toContainEqual({ date: '2026-06-30', source: 'report:הראל-קרנות-נאמנות:5111111', bucket: 'mutual_fund', value_ils: 30_000 });
+    const s = summary(db, '2026-07-15');
+    expect(s.investments).toBe(60_000);
+    expect(s.allocation.type).toEqual([{ key: 'mutual_fund', label: 'Funds', value: 50_000 }, { key: 'stock', label: 'Stocks & ETFs', value: 10_000 }]);
+    expect(history(db, 'All', 'type', '2026-07-15').series.map(x => x.label)).toEqual(['Stocks & ETFs', 'Funds']);
+    // the next statement finds each fund by its number
+    const next = await importReport(db, file(), { extract: ai({ ...statement, asOf: '2026-07-31', statedTotal: null, products: [fund('5111111', 'הראל מחקה תא125', 31_000), ...statement.products.slice(1)] }) });
+    expect(next.report.status).toBe('applied');
+    expect(holdings(db).filter(h => h.asset_class === 'mutual_fund').map(h => [h.symbol, h.manual_price])).toEqual([['Fund ••1111', 31_000], ['Fund ••2222', 20_000]]);
+  });
+
   it('tidies the model output', () => {
     const x = normalizeExtraction({ issuer: ' מגדל ', reportType: 'Quarterly', asOf: '30/06/2026', currency: 'ils', statedTotal: null,
       products: [{ provider: 'מגדל', productType: 'hishtalmut', balance: 5, currency: null, confidence: 2 }, { balance: 'x' }], questions: [{ text: 'ok?' }] });
     expect(x).toMatchObject({ issuer: 'מגדל', reportType: 'quarterly', asOf: null, currency: 'ILS', questions: [{ id: '1', text: 'ok?' }] });
     expect(x.products).toEqual([expect.objectContaining({ productType: 'other', currency: 'ILS', confidence: 1, accountNumber: null })]);
+    expect(normalizeExtraction({ products: [{ productType: 'mutual_fund', balance: 1 }] }).products[0].productType).toBe('mutual_fund');
   });
 });

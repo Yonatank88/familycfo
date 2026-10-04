@@ -8,6 +8,8 @@ import { asOf, day, money, monthLong, monthShort, pct, shortDay, signedMoney, si
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
 const COLORS = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c5)', 'var(--c6)'];
 const OTHER = 'var(--c7)';
+/** Funds keep one colour of their own: with the long-term savings types the cycle above runs out */
+const FUNDS = 'var(--c8)';
 
 /** A section: title (and an optional control) above a quiet card. */
 function Section({ title, action, children, flush = false }: { title: string; action?: ReactNode; children: ReactNode; flush?: boolean }) {
@@ -234,7 +236,8 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
 }
 
 const PRODUCT_TYPES: Record<string, string> = {
-  pension: 'Pension', study_fund: 'Study fund', provident_fund: 'Provident fund', brokerage: 'Brokerage', deposit: 'Deposit', other: 'Other',
+  pension: 'Pension', study_fund: 'Study fund', provident_fund: 'Provident fund', mutual_fund: 'Fund', brokerage: 'Brokerage', deposit: 'Deposit',
+  other: 'Other',
 };
 const STATUS: Record<ReportStatus, { label: string; className: string }> = {
   extracting: { label: 'Reading…', className: 'bg-ink/[0.045] text-muted' },
@@ -610,6 +613,7 @@ export default function Dashboard() {
   const seriesKeys = (h?.series ?? []).map(x => x.key);
   const colorOf = (key: string) => {
     if (key === 'other') return OTHER;
+    if (key === 'mutual_fund') return FUNDS;
     const i = seriesKeys.indexOf(key);
     return COLORS[(i >= 0 ? i : seriesKeys.length + (s?.allocation[group].findIndex(x => x.key === key) ?? 0)) % COLORS.length];
   };

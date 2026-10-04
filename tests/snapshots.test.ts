@@ -48,6 +48,18 @@ describe('snapshots', () => {
     expect(summary(db, '2026-05-01')).toMatchObject({ netWorth: 435, bank: 0, investments: 735, cardsOwed: 300 });
   });
 
+  it('a mutual fund holding is its own bucket, Funds', () => {
+    const db = testDb();
+    addHolding(db, { source: 'bank:funds', symbol: '5111111', quantity: 1, currency: 'ILS', assetClass: 'mutual_fund', price: 2500 });
+    addHolding(db, { source: 'bank:funds', symbol: 'TEVA.TA', quantity: 10, currency: 'ILS', assetClass: 'stock', price: 50 });
+    writeSnapshots(db, [{ source: 'bank:funds', kind: 'investment', success: true }], '2026-05-01');
+    expect(snaps(db)).toEqual([
+      { date: '2026-05-01', source: 'bank:funds', bucket: 'mutual_fund', value_ils: 2500 },
+      { date: '2026-05-01', source: 'bank:funds', bucket: 'stock', value_ils: 500 },
+    ]);
+    expect(summary(db, '2026-05-01')).toMatchObject({ investments: 3000, allocation: { type: [{ key: 'mutual_fund', label: 'Funds', value: 2500 }, { key: 'stock', label: 'Stocks & ETFs', value: 500 }] } });
+  });
+
   it('gain since purchase comes from the cost basis, in the holding currency', () => {
     const db = testDb();
     rate(db, '2026-05-01', 'USD', 3.5);
@@ -135,7 +147,7 @@ describe('database', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-base-${process.pid}.db`;
     openDb(path).close();
     const db = new Database(path);
-    expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102]);
+    expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102, 103]);
     // back to the baseline: holdings with the old asset classes and no cost_basis, no reports
     db.exec(`DELETE FROM schema_version WHERE version > 100; DROP TABLE report_values; DROP TABLE reports; DROP TABLE holdings;
       CREATE TABLE holdings (id INTEGER PRIMARY KEY, source TEXT NOT NULL, symbol TEXT NOT NULL, name TEXT, quantity REAL NOT NULL, currency TEXT,
@@ -146,12 +158,36 @@ describe('database', () => {
         (3, 'ibkr:U1', 'VOO', 10, 'USD', 'stock', 0), (7, 'binance:spot', 'BTC-USD', 0.1, 'USD', 'crypto', 1)`);
     db.close();
     const reopened = openDb(path);
-    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102]);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102, 103]);
     expect(reopened.prepare(`SELECT id, source, symbol, quantity, asset_class, archived, cost_basis FROM holdings ORDER BY id`).all()).toEqual([
       { id: 3, source: 'ibkr:U1', symbol: 'VOO', quantity: 10, asset_class: 'stock', archived: 0, cost_basis: null },
       { id: 7, source: 'binance:spot', symbol: 'BTC-USD', quantity: 0.1, asset_class: 'crypto', archived: 1, cost_basis: null },
     ]);
     reopened.prepare(`INSERT INTO holdings (source, symbol, quantity, asset_class) VALUES ('report:x:1', 'Pension', 1, 'pension')`).run();
+    reopened.close();
+    rmSync(path, { force: true });
+  });
+
+  it('step 103 widens holdings.asset_class to mutual_fund, keeping every row of a 102 database', () => {
+    const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-102-${process.pid}.db`;
+    openDb(path).close();
+    const db = new Database(path);
+    // back to 102: the step-102 holdings table (no mutual_fund), with rows
+    db.exec(`DELETE FROM schema_version WHERE version > 102; DROP TABLE holdings;
+      CREATE TABLE holdings (id INTEGER PRIMARY KEY, source TEXT NOT NULL, symbol TEXT NOT NULL, name TEXT, quantity REAL NOT NULL, currency TEXT,
+        asset_class TEXT NOT NULL CHECK (asset_class IN ('stock','crypto','stablecoin','broker_cash','pension','study_fund','provident_fund','deposit','other')),
+        broker TEXT, manual_price REAL, manual_price_date TEXT, archived INTEGER NOT NULL DEFAULT 0, synced_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, cost_basis REAL, UNIQUE (source, symbol));
+      INSERT INTO holdings (id, source, symbol, name, quantity, currency, asset_class, broker, manual_price, manual_price_date, archived, cost_basis) VALUES
+        (2, 'ibkr:U1', 'VOO', 'Vanguard', 10, 'USD', 'stock', 'IBKR', NULL, NULL, 0, 4000),
+        (5, 'report:x:1', 'Study fund ••0001', 'x', 1, 'ILS', 'study_fund', 'x', 1000, '2026-06-30', 1, NULL)`);
+    const before = db.prepare(`SELECT * FROM holdings ORDER BY id`).all();
+    db.close();
+    const reopened = openDb(path);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102, 103]);
+    expect(reopened.prepare(`SELECT * FROM holdings ORDER BY id`).all()).toEqual(before);
+    reopened.prepare(`INSERT INTO holdings (source, symbol, quantity, asset_class) VALUES ('report:y:5111111', 'Fund ••1111', 1, 'mutual_fund')`).run();
+    expect(() => reopened.prepare(`INSERT INTO holdings (source, symbol, quantity, asset_class) VALUES ('x', 'y', 1, 'nope')`).run()).toThrow(/CHECK/);
     reopened.close();
     rmSync(path, { force: true });
   });

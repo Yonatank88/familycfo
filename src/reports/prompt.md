@@ -5,7 +5,7 @@ with the structured output only.
 Most reports are Israeli and in Hebrew (right-to-left; a PDF's text may come out with words or digits in reverse
 order — read the numbers as they appear on the page). Typical sources: המסלקה הפנסיונית (consolidated report), הר הכסף,
 an insurance agent's periodic report, a fund's quarterly / annual statement (דוח רבעוני / דוח שנתי), a bank or brokerage
-statement.
+statement (which may list securities and mutual funds — קרנות נאמנות — among its holdings).
 
 ## What to return
 
@@ -20,21 +20,31 @@ statement.
 - `currency` — the report's main currency, ISO code: ₪ / ש"ח / שקל → `ILS`, $ → `USD`, € → `EUR`.
 - `products` — one entry per account / policy / fund that holds money:
   - `provider` — the managing company (חברה מנהלת / גוף מנהל / בית השקעות / בנק), as printed: מגדל, הראל, כלל, מנורה
-    מבטחים, הפניקס, אלטשולר שחם, מור, ילין לפידות, מיטב, אנליסט, הלמן-אלדובי, אינפיניטי…
+    מבטחים, הפניקס, אלטשולר שחם, מור, ילין לפידות, מיטב, אנליסט, הלמן-אלדובי, אינפיניטי… For a mutual fund: its fund
+    manager (מנהל הקרן, e.g. "הראל קרנות נאמנות", "מיטב מנהל קרנות") when printed, else the bank or broker holding it,
+    as printed.
   - `productType`:
     - `pension` — קרן פנסיה (מקיפה / כללית / משלימה / ותיקה), ביטוח מנהלים, פוליסת ביטוח חיים עם חיסכון, תיק חיסכון
       פנסיוני;
     - `study_fund` — קרן השתלמות;
     - `provident_fund` — קופת גמל, קופת גמל להשקעה (גמל להשקעה), קופת גמל לחיסכון לכל ילד, פוליסת חיסכון;
-    - `brokerage` — a securities account / investment portfolio (תיק ניירות ערך, חשבון מסחר);
+    - `mutual_fund` — an Israeli mutual fund (קרן נאמנות, including an index-tracking קרן נאמנות מחקה and a money-market
+      קרן כספית), usually shown with a fund number (מספר קרן / מספר נייר), units (יחידות / כמות) and a price per unit
+      (מחיר יחידה / שער). One product per fund, also when the fund sits inside a bank or brokerage statement;
+    - `brokerage` — a securities account / investment portfolio (תיק ניירות ערך, חשבון מסחר) holding anything that is
+      not a mutual fund: shares, bonds, ETFs (קרן סל / תעודת סל are securities, not mutual funds), securities cash. When
+      the statement also lists mutual funds, they are separate products and the brokerage balance leaves them out;
     - `deposit` — פיקדון, תוכנית חיסכון בבנק;
     - `other` — anything else that holds money.
   - `accountNumber` — the household's account / policy / member number (מספר חשבון, מספר פוליסה, מספר עמית) as
-    printed, else null. Not מספר קופה / מס' אישור מס — those identify the fund itself.
+    printed, else null. Not מספר קופה / מס' אישור מס — those identify the fund itself. For a mutual fund, the opposite:
+    its fund number (מספר קרן / מספר נייר ערך) when printed, else the account it is held in.
   - `name` — the product's name as printed (e.g. "מגדל השתלמות כללי", "הראל פנסיה מקיפה").
   - `balance` — the total accumulated balance today (יתרה / צבירה / סך החיסכון / ערך פדיון when it is the only total),
     a plain number: no ₪, no thousands separators; a trailing or leading minus or parentheses mean negative. Not the
-    monthly deposit, not projected pension (קצבה צפויה), not insurance coverage amounts.
+    monthly deposit, not projected pension (קצבה צפויה), not insurance coverage amounts. A mutual fund's balance is its
+    market value (שווי / שווי שוק / שווי אחזקה); with only units and a price, units × price — a price quoted in agorot
+    (באגורות, common for Israeli funds) is divided by 100 — and confidence below 0.8.
   - `currency` — ISO code of that balance.
   - `liquidityDate` — when the money can be withdrawn without penalty, if the report says (תאריך נזילות / מועד
     נזילות / "ניתן למשיכה החל מ"). For a study fund with no stated date but a stated join date (תאריך הצטרפות / תחילת

@@ -1,5 +1,6 @@
 /** How a position counts on the dashboard. Set by each sync adapter (or report import), stored on the holding. */
-export type AssetClass = 'stock' | 'crypto' | 'stablecoin' | 'broker_cash' | 'pension' | 'study_fund' | 'provident_fund' | 'deposit' | 'other';
+export type AssetClass = 'stock' | 'crypto' | 'stablecoin' | 'broker_cash' | 'mutual_fund' | 'pension' | 'study_fund' | 'provident_fund' | 'deposit'
+  | 'other';
 
 /**
  * USD-pegged stablecoins — one list for pricing (they're quoted like any coin, never assumed to be $1) and for the

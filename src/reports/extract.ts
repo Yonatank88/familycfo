@@ -10,7 +10,7 @@ import readExcelFile from 'read-excel-file/node';
  * and the one tool `Read`, confined to a temp dir that holds only the report. The prompts are prompt.md and revise.md.
  */
 
-export const PRODUCT_TYPES = ['pension', 'study_fund', 'provident_fund', 'brokerage', 'deposit', 'other'] as const;
+export const PRODUCT_TYPES = ['pension', 'study_fund', 'provident_fund', 'mutual_fund', 'brokerage', 'deposit', 'other'] as const;
 export type ProductType = typeof PRODUCT_TYPES[number];
 
 export interface ExtractedProduct {
@@ -59,7 +59,7 @@ export const EXTRACTION_SCHEMA = {
         properties: {
           provider: { type: 'string' },
           productType: { type: 'string', enum: PRODUCT_TYPES },
-          accountNumber: nullable('string'),
+          accountNumber: { ...nullable('string'), description: 'the account / policy number; for a mutual fund, its fund number (מספר קרן) when printed' },
           name: { type: 'string' },
           balance: { type: 'number' },
           currency: { type: 'string' },

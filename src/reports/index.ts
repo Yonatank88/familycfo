@@ -9,7 +9,7 @@ import { corroborate, knownProducts, normalizeAccount, productKey, slug, type Co
 import { claudeExtractor, REPORT_TYPES, type Extraction, type Extractor, type ProductType, type Question } from './extract.js';
 
 /**
- * Reports (pension, study fund, provident fund, statements…) → holdings. A file is stored by its sha256, read by the AI,
+ * Reports (pension, study fund, provident fund, mutual funds, statements…) → holdings. A file is stored by its sha256, read by the AI,
  * corroborated against what's stored, and applied — or held for review with questions. Each product is a holding
  * `report:<provider>:<account>` priced at its latest balance; every report's balances are its value points, and the
  * snapshots step-hold them between reports.
@@ -30,10 +30,12 @@ export interface ReportRow {
 export interface ReportEdits { asOf?: string; balances?: Record<string, number> }
 
 const ASSET_CLASS: Record<ProductType, AssetClass> = {
-  pension: 'pension', study_fund: 'study_fund', provident_fund: 'provident_fund', brokerage: 'stock', deposit: 'deposit', other: 'other',
+  pension: 'pension', study_fund: 'study_fund', provident_fund: 'provident_fund', mutual_fund: 'mutual_fund', brokerage: 'stock', deposit: 'deposit',
+  other: 'other',
 };
 const SYMBOL: Record<string, string> = {
-  pension: 'Pension', study_fund: 'Study fund', provident_fund: 'Provident fund', brokerage: 'Brokerage', deposit: 'Deposit', other: 'Other',
+  pension: 'Pension', study_fund: 'Study fund', provident_fund: 'Provident fund', mutual_fund: 'Fund', brokerage: 'Brokerage', deposit: 'Deposit',
+  other: 'Other',
 };
 
 const json = <T>(s: string | null, fallback: T): T => (s ? JSON.parse(s) as T : fallback);
