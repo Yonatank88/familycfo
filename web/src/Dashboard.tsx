@@ -1,36 +1,35 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from 'recharts';
+import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { api, type Account, type ExpenseMonth, type Group, type Holding, type Range, type ScrapeState, type Slice } from './api';
-import { asOf, compact, day, money, monthLong, monthShort, pct, shortDay, signedMoney, signedPct, type Currency } from './format';
+import { asOf, day, money, monthLong, monthShort, pct, shortDay, signedMoney, signedPct, type Currency } from './format';
 
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
-const COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#64748b'];
+const COLORS = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c5)', 'var(--c6)'];
+const OTHER = 'var(--c7)';
 
-function Card({ title, actions, children, className = '' }: { title?: string; actions?: ReactNode; children: ReactNode; className?: string }) {
+/** A section: title (and an optional control) above a quiet card. */
+function Section({ title, action, children, flush = false }: { title: string; action?: ReactNode; children: ReactNode; flush?: boolean }) {
   return (
-    <section className={`rounded-lg border border-slate-200 bg-white p-5 ${className}`}>
-      {(title || actions) && (
-        <div className="mb-4 flex items-center justify-between gap-3">
-          {title && <h2 className="text-sm font-semibold text-slate-700">{title}</h2>}
-          {actions}
-        </div>
-      )}
-      {children}
+    <section>
+      <div className="flex min-h-8 items-center justify-between gap-3 pb-2">
+        <h2 className="text-sm font-semibold tracking-tight text-ink">{title}</h2>
+        {action}
+      </div>
+      <div className={`rounded-xl border border-line/80 bg-surface/80 ${flush ? 'py-1' : 'p-4'}`}>{children}</div>
     </section>
   );
 }
 
-function Segmented<T extends string>({ value, options, onChange, disabled }: {
+function Pills<T extends string>({ value, options, onChange, disabled }: {
   value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; disabled?: (v: T) => boolean;
 }) {
   return (
-    <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
+    <div className="inline-flex rounded-full bg-ink/[0.045] p-0.5 text-xs">
       {options.map(o => (
         <button key={o.value} type="button" disabled={disabled?.(o.value)} onClick={() => onChange(o.value)}
-          className={`rounded px-2.5 py-1 font-medium disabled:opacity-40 ${o.value === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+          className={`rounded-full px-3 py-1 font-medium transition-colors disabled:opacity-40 ${
+            o.value === value ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'}`}>
           {o.label}
         </button>
       ))}
@@ -38,12 +37,16 @@ function Segmented<T extends string>({ value, options, onChange, disabled }: {
   );
 }
 
-const changeClass = (n: number | null | undefined) => (n == null || n === 0 ? 'text-slate-500' : n > 0 ? 'text-emerald-600' : 'text-rose-600');
+const tone = (n: number | null | undefined) => (n == null || n === 0 ? 'text-muted' : n > 0 ? 'text-up' : 'text-down');
 
 function Change({ now, start, currency }: { now: number; start: number | null | undefined; currency: Currency }) {
-  if (start == null) return <span className="text-slate-400">—</span>;
+  if (start == null) return <span className="text-faint">—</span>;
   const diff = now - start;
-  return <span className={changeClass(diff)}>{signedMoney(diff, currency)} · {signedPct(start ? (diff / Math.abs(start)) * 100 : null)}</span>;
+  return (
+    <span className={`tabular-nums ${tone(diff)}`}>
+      {signedMoney(diff, currency)}<span className="mx-1.5 text-line">|</span>{signedPct(start ? (diff / Math.abs(start)) * 100 : null)}
+    </span>
+  );
 }
 
 function useScrape() {
@@ -79,16 +82,16 @@ function Refresh() {
     <div className="flex items-center gap-2 text-xs">
       {state?.otp && (
         <form className="flex items-center gap-1.5" onSubmit={e => { e.preventDefault(); otp(code.trim()); setCode(''); }}>
-          <label className="text-slate-600" htmlFor="otp">{state.otp.company} code</label>
+          <label className="text-muted" htmlFor="otp">{state.otp.company} code</label>
           <input id="otp" value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code"
-            className="w-24 rounded-md border border-slate-300 px-2 py-1" />
-          <button type="submit" className="rounded-md bg-slate-900 px-2.5 py-1 font-medium text-white">Send</button>
+            className="w-24 rounded-full border border-line bg-surface px-3 py-1 outline-none focus:border-faint" />
+          <button type="submit" className="rounded-full bg-ink px-3 py-1 font-medium text-paper">Send</button>
         </form>
       )}
-      {error && <span className="text-rose-600">{error}</span>}
-      {running && <span className="text-slate-500">{state?.status === 'pipeline' ? 'Processing…' : `Refreshing ${done}/${state?.companies.length ?? 0}`}</span>}
+      {error && <span className="text-down">{error}</span>}
+      {running && <span className="tabular-nums text-muted">{state?.status === 'pipeline' ? 'Processing…' : `Refreshing ${done}/${state?.companies.length ?? 0}`}</span>}
       <button type="button" onClick={start} disabled={running}
-        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+        className="rounded-full border border-line bg-surface px-3.5 py-1 font-medium text-ink shadow-sm hover:bg-paper disabled:opacity-50">
         Refresh
       </button>
     </div>
@@ -102,45 +105,49 @@ function ChartTooltip({ active, payload, label, currency, labels }: {
   const rows = [...payload].filter(p => p.value).sort((a, b) => b.value - a.value);
   const total = rows.reduce((s, p) => s + p.value, 0);
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
-      <div className="mb-1 font-medium text-slate-700">{day(label)}</div>
+    <div className="min-w-48 rounded-lg border border-line bg-surface/95 px-3 py-2 text-xs shadow-md backdrop-blur">
+      <div className="mb-1.5 text-muted">{day(label)}</div>
       {rows.map(p => (
-        <div key={p.dataKey} className="flex items-center justify-between gap-6">
-          <span className="flex items-center gap-1.5 text-slate-600"><span className="h-2 w-2 rounded-sm" style={{ background: p.color }} />{labels[p.dataKey]}</span>
-          <span className="tabular-nums text-slate-900">{money(p.value, currency)}</span>
+        <div key={p.dataKey} className="flex items-center justify-between gap-6 py-0.5">
+          <span className="flex items-center gap-1.5 text-muted"><span className="h-1.5 w-1.5 rounded-full" style={{ background: p.color }} />{labels[p.dataKey]}</span>
+          <span className="tabular-nums text-ink">{money(p.value, currency)}</span>
         </div>
       ))}
-      <div className="mt-1 flex justify-between gap-6 border-t border-slate-100 pt-1 font-medium">
+      <div className="mt-1.5 flex justify-between gap-6 border-t border-line pt-1.5 font-medium text-ink">
         <span>Total</span><span className="tabular-nums">{money(total, currency)}</span>
       </div>
     </div>
   );
 }
 
-function Allocation({ slices, currency, convert, colorOf }: { slices: Slice[]; currency: Currency; convert: (n: number) => number; colorOf: (key: string) => string }) {
+function Allocation({ slices, currency, convert, colorOf }: {
+  slices: Slice[]; currency: Currency; convert: (n: number) => number; colorOf: (key: string) => string;
+}) {
   const top = slices.length > 5 ? [...slices.slice(0, 4), { key: 'other', label: 'Other', value: slices.slice(4).reduce((s, x) => s + x.value, 0) }] : slices;
   const total = top.reduce((s, x) => s + x.value, 0);
-  if (!total) return <p className="text-sm text-slate-400">No data</p>;
+  if (!total) return <p className="text-sm text-faint">No data</p>;
   return (
-    <div className="flex items-center gap-5">
+    <div className="flex flex-col items-center gap-5 sm:flex-row lg:flex-col">
       <div className="h-36 w-36 shrink-0">
         <ResponsiveContainer>
           <PieChart>
-            <Pie data={top} dataKey="value" nameKey="label" innerRadius="62%" outerRadius="100%" stroke="none" isAnimationActive={false}>
+            <Pie data={top} dataKey="value" nameKey="label" innerRadius="70%" outerRadius="100%" paddingAngle={2} cornerRadius={3}
+              stroke="none" isAnimationActive={false}>
               {top.map(s => <Cell key={s.key} fill={colorOf(s.key)} />)}
             </Pie>
           </PieChart>
         </ResponsiveContainer>
       </div>
-      <ol className="min-w-0 flex-1 space-y-1.5 text-sm">
+      <ol className="w-full min-w-0 flex-1 space-y-2 text-sm">
         {top.map(s => (
           <li key={s.key} className="flex items-center justify-between gap-3">
-            <span className="flex min-w-0 items-center gap-2 text-slate-700">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: colorOf(s.key) }} />
+            <span className="flex min-w-0 items-center gap-2 text-ink">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: colorOf(s.key) }} />
               <span className="truncate">{s.label}</span>
             </span>
-            <span className="shrink-0 tabular-nums text-slate-500">
-              {money(convert(s.value), currency)} <span className="ml-1 inline-block w-10 text-right">{Math.round((s.value / total) * 100)}%</span>
+            <span className="flex shrink-0 items-baseline gap-2 tabular-nums">
+              <span className="text-muted">{money(convert(s.value), currency)}</span>
+              <span className="w-9 text-right text-xs text-faint">{Math.round((s.value / total) * 100)}%</span>
             </span>
           </li>
         ))}
@@ -151,63 +158,65 @@ function Allocation({ slices, currency, convert, colorOf }: { slices: Slice[]; c
 
 function Accounts({ accounts, currency, convert }: { accounts: Account[]; currency: Currency; convert: (n: number) => number }) {
   return (
-    <table className="w-full text-sm">
-      <tbody>
-        {accounts.map(a => (
-          <tr key={a.id} className="border-t border-slate-100 first:border-0">
-            <td className="py-2 pr-2">
-              <span title={a.stale ? `Last successful sync: ${asOf(a.lastSuccessAt)}` : undefined}
-                className={`inline-block h-2 w-2 rounded-full ${a.stale ? 'bg-amber-500' : 'bg-transparent'}`} />
-            </td>
-            <td className="py-2 pr-3">
-              <div className="text-slate-800">{a.label}</div>
-              <div className="text-xs text-slate-400">{a.label === a.sourceLabel ? '' : `${a.sourceLabel} · `}as of {asOf(a.asOf)}</div>
-            </td>
-            <td className="py-2 text-right tabular-nums">
-              <div className={a.fxMissing ? 'text-amber-600' : 'text-slate-900'}>{a.valueIls == null ? '—' : money(convert(a.valueIls), currency)}</div>
-              {a.currency !== 'ILS' && a.value != null && <div className="text-xs text-slate-400">{money(a.value, a.currency)}</div>}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <ul className="divide-y divide-line/70">
+      {accounts.map(a => (
+        <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-sm text-ink">
+              <span className="truncate">{a.label}</span>
+              {a.stale && <span title={`Last successful sync: ${asOf(a.lastSuccessAt)}`} className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />}
+            </div>
+            <div className="truncate text-xs text-faint">{a.label === a.sourceLabel ? '' : `${a.sourceLabel} · `}{asOf(a.asOf)}</div>
+          </div>
+          <div className="text-right tabular-nums">
+            <div className={`text-sm ${a.fxMissing ? 'text-warn' : 'text-ink'}`}>{a.valueIls == null ? '—' : money(convert(a.valueIls), currency)}</div>
+            {a.currency !== 'ILS' && a.value != null && <div className="text-xs text-faint">{money(a.value, a.currency)}</div>}
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 function Holdings({ holdings, currency, convert }: { holdings: Holding[]; currency: Currency; convert: (n: number) => number }) {
   const [all, setAll] = useState(false);
   const shown = all ? holdings : holdings.slice(0, 10);
+  const th = 'px-4 pb-2 pt-2 text-[11px] font-medium uppercase tracking-wide text-faint';
   return (
     <>
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-xs text-slate-400">
-            <th className="pb-2 text-left font-normal">Symbol</th>
-            <th className="pb-2 text-right font-normal">Value</th>
-            <th className="pb-2 text-right font-normal">Share</th>
-            <th className="pb-2 text-right font-normal">Change</th>
+          <tr>
+            <th className={`${th} text-left`}>Symbol</th>
+            <th className={`${th} text-right`}>Value</th>
+            <th className={`${th} text-right max-sm:hidden`}>Weight</th>
+            <th className={`${th} text-right`}>Change</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-line/70 border-t border-line/70">
           {shown.map(h => (
-            <tr key={h.id} className="border-t border-slate-100">
-              <td className="py-2 pr-3">
-                <div className="text-slate-800">{h.symbol}</div>
-                <div className="max-w-48 truncate text-xs text-slate-400">{h.sourceLabel}{h.name !== h.symbol ? ` · ${h.name}` : ''}</div>
+            <tr key={h.id}>
+              <td className="px-4 py-2.5">
+                <div className="font-medium text-ink">{h.symbol}</div>
+                <div className="max-w-40 truncate text-xs text-faint sm:max-w-56">{h.sourceLabel}{h.name !== h.symbol ? ` · ${h.name}` : ''}</div>
               </td>
-              <td className={`py-2 text-right tabular-nums ${h.fxMissing ? 'text-amber-600' : 'text-slate-900'}`}>
+              <td className={`px-4 py-2.5 text-right tabular-nums ${h.fxMissing ? 'text-warn' : 'text-ink'}`}>
                 {h.valueIls == null ? money(h.value, h.currency) : money(convert(h.valueIls), currency)}
               </td>
-              <td className="py-2 text-right tabular-nums text-slate-500">{pct(h.pctOfInvestments)}</td>
-              <td className={`py-2 text-right tabular-nums ${changeClass(h.changePct)}`}>{signedPct(h.changePct)}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-muted max-sm:hidden">{pct(h.pctOfInvestments)}</td>
+              <td className={`px-4 py-2.5 text-right tabular-nums ${tone(h.changePct)}`}>{signedPct(h.changePct)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
       {holdings.length > 10 && (
-        <button type="button" onClick={() => setAll(!all)} className="mt-3 text-xs font-medium text-slate-500 hover:text-slate-800">
-          {all ? 'Show top 10' : `Show all ${holdings.length}`}
-        </button>
+        <div className="border-t border-line/70 px-4 pb-2 pt-2.5">
+          <button type="button" onClick={() => setAll(!all)} className="text-xs font-medium text-muted hover:text-ink">
+            {all ? 'Show top 10' : `Show all ${holdings.length}`}
+          </button>
+        </div>
       )}
     </>
   );
@@ -220,34 +229,41 @@ function ExpenseRowsPanel({ month, merchant, onClose }: { month: string; merchan
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  const total = data?.reduce((s, r) => s + r.amount, 0);
   return (
-    <div className="fixed inset-0 z-20 flex justify-end bg-slate-900/20" onClick={onClose}>
-      <aside className="flex h-full w-full max-w-xl flex-col bg-white shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-800">{monthLong(month)}{merchant ? ` · ${merchant.name}` : ''}</h2>
-          <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-900">Close</button>
+    <div className="fixed inset-0 z-20 flex justify-end bg-ink/15" onClick={onClose}>
+      <aside className="flex h-full w-full max-w-xl flex-col border-l border-line bg-paper shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-6 pb-4 pt-6">
+          <div>
+            <div className="text-xs text-muted">{monthLong(month)}</div>
+            <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-ink" dir="auto">{merchant?.name ?? 'Expenses'}</h2>
+            {total != null && <div className="mt-1 text-sm tabular-nums text-muted">{money(total)}</div>}
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full px-3 py-1 text-xs font-medium text-muted hover:bg-ink/5 hover:text-ink">Close</button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-2">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs text-slate-400">
-                <th className="py-2 text-left font-normal">Date</th>
-                <th className="py-2 text-left font-normal">Description</th>
-                <th className="py-2 text-left font-normal">Account</th>
-                <th className="py-2 text-right font-normal">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.map(r => (
-                <tr key={r.id} className="border-t border-slate-100">
-                  <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{shortDay(r.date)}</td>
-                  <td className="py-2 pr-3 text-slate-800" dir="auto">{r.description}</td>
-                  <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{r.account}</td>
-                  <td className="py-2 text-right tabular-nums text-slate-900">{money(r.amount)}</td>
+        <div className="flex-1 overflow-y-auto px-6 pb-6">
+          <div className="rounded-xl border border-line/80 bg-surface/80">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-faint">
+                  <th className="px-4 py-2 text-left font-medium">Date</th>
+                  <th className="px-4 py-2 text-left font-medium">Description</th>
+                  <th className="px-4 py-2 text-left font-medium max-sm:hidden">Account</th>
+                  <th className="px-4 py-2 text-right font-medium">Amount</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-line/70 border-t border-line/70">
+                {data?.map(r => (
+                  <tr key={r.id}>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-muted">{shortDay(r.date)}</td>
+                    <td className="px-4 py-2.5 text-ink" dir="auto">{r.description}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-muted max-sm:hidden">{r.account}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">{money(r.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </aside>
     </div>
@@ -259,47 +275,45 @@ function Expenses({ months, current }: { months: ExpenseMonth[]; current: string
   const [panel, setPanel] = useState<{ month: string; merchant?: { key: string; name: string } } | null>(null);
   const month = months.find(m => m.month === selected) ?? months.at(-1)!;
   return (
-    <Card title="Expenses">
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="h-56 lg:col-span-2">
+    <Section title="Expenses" action={<span className="text-xs tabular-nums text-muted">{monthLong(month.month)} · {money(month.total)}</span>}>
+      <div className="grid gap-6 md:grid-cols-5">
+        <div className="h-48 md:col-span-3">
           <ResponsiveContainer>
             <BarChart data={months} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
               onClick={(e: { activeLabel?: string | number } | null) => {
                 const m = e?.activeLabel != null ? String(e.activeLabel) : null;
                 if (m) { setSelected(m); setPanel({ month: m }); }
               }}>
-              <CartesianGrid vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="month" tickFormatter={monthShort} tickLine={false} axisLine={false} fontSize={11} stroke="#94a3b8" />
-              <YAxis tickFormatter={v => compact(v, 'ILS')} tickLine={false} axisLine={false} fontSize={11} stroke="#94a3b8" width={56} />
-              <Tooltip cursor={{ fill: '#f8fafc' }} formatter={v => money(Number(v))} labelFormatter={l => monthLong(String(l))} />
-              <Bar dataKey="total" name="Spent" radius={[3, 3, 0, 0]} className="cursor-pointer" isAnimationActive={false}>
+              <XAxis dataKey="month" tickFormatter={monthShort} tickLine={false} axisLine={false} fontSize={11} tick={{ fill: 'var(--color-faint)' }} />
+              <Tooltip cursor={{ fill: 'rgba(29,28,26,0.04)' }}
+                content={({ active, payload, label }) => active && payload?.length ? (
+                  <div className="rounded-lg border border-line bg-surface/95 px-3 py-2 text-xs shadow-md">
+                    <div className="text-muted">{monthLong(String(label))}</div>
+                    <div className="mt-0.5 tabular-nums text-ink">{money(Number(payload[0].value))}</div>
+                  </div>
+                ) : null} />
+              <Bar dataKey="total" radius={[4, 4, 0, 0]} maxBarSize={28} className="cursor-pointer" isAnimationActive={false}>
                 {months.map(m => (
-                  <Cell key={m.month} fill={m.month === current ? '#2563eb' : m.month === selected ? '#94a3b8' : '#cbd5e1'} />
+                  <Cell key={m.month} fill={m.month === current ? 'var(--c1)' : m.month === selected ? 'var(--c2)' : '#e3ded1'} />
                 ))}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div>
-          <div className="mb-2 flex items-baseline justify-between">
-            <h3 className="text-sm font-medium text-slate-700">{monthLong(month.month)}</h3>
-            <span className="text-sm tabular-nums text-slate-900">{money(month.total)}</span>
-          </div>
-          <ol className="text-sm">
-            {month.merchants.map(m => (
-              <li key={m.key}>
-                <button type="button" onClick={() => setPanel({ month: month.month, merchant: { key: m.key, name: m.name } })}
-                  className="flex w-full items-center justify-between gap-3 border-t border-slate-100 py-1.5 text-left hover:bg-slate-50">
-                  <span className="truncate text-slate-700" dir="auto">{m.name}</span>
-                  <span className="shrink-0 tabular-nums text-slate-500">{money(m.total)}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-        </div>
+        <ol className="text-sm md:col-span-2">
+          {month.merchants.map(m => (
+            <li key={m.key}>
+              <button type="button" onClick={() => setPanel({ month: month.month, merchant: { key: m.key, name: m.name } })}
+                className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left hover:bg-ink/[0.035]">
+                <span className="truncate text-ink" dir="auto">{m.name}</span>
+                <span className="shrink-0 tabular-nums text-muted">{money(m.total)}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
       </div>
       {panel && <ExpenseRowsPanel month={panel.month} merchant={panel.merchant} onClose={() => setPanel(null)} />}
-    </Card>
+    </Section>
   );
 }
 
@@ -326,7 +340,7 @@ export default function Dashboard() {
   // one color per series key, shared by the chart and the allocation
   const seriesKeys = (h?.series ?? []).map(x => x.key);
   const colorOf = (key: string) => {
-    if (key === 'other') return '#94a3b8';
+    if (key === 'other') return OTHER;
     const i = seriesKeys.indexOf(key);
     return COLORS[(i >= 0 ? i : seriesKeys.length + (s?.allocation[group].findIndex(x => x.key === key) ?? 0)) % COLORS.length];
   };
@@ -342,70 +356,80 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <h1 className="text-base font-semibold text-slate-900">FamilyCFO</h1>
-          <div className="flex flex-wrap items-center gap-3">
-            <Segmented value={range} onChange={setRange} options={RANGES.map(r => ({ value: r, label: r }))} />
-            <Segmented value={currency} onChange={setCurrency} disabled={v => v === 'USD' && !usdNow}
-              options={[{ value: 'ILS', label: '₪' }, { value: 'USD', label: '$' }]} />
-            <Refresh />
-          </div>
+      <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 pt-4 sm:px-8">
+        <span className="text-sm font-semibold tracking-tight text-ink">FamilyCFO</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Pills value={currency} onChange={setCurrency} disabled={v => v === 'USD' && !usdNow}
+            options={[{ value: 'ILS', label: '₪' }, { value: 'USD', label: '$' }]} />
+          <Refresh />
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl space-y-4 px-4 py-6 sm:px-6">
-        {summary.error && <Card><p className="text-sm text-rose-600">{(summary.error as Error).message}</p></Card>}
+      <main className="mx-auto max-w-6xl px-4 pb-12 sm:px-8">
+        {summary.error && <p className="pt-8 text-sm text-down">{(summary.error as Error).message}</p>}
+
         {s && (
-          <Card>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Net worth</div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className="text-3xl font-semibold tabular-nums text-slate-900">{money(convert(s.netWorth), currency)}</span>
-              <span className="text-sm tabular-nums"><Change now={convert(s.netWorth)} start={startOf(h?.start?.netWorth)} currency={currency} /></span>
+          <div className="pt-8">
+            <div className="text-xs font-medium text-muted">Net worth</div>
+            <div className="mt-1 text-4xl font-semibold tracking-tight tabular-nums text-ink">{money(convert(s.netWorth), currency)}</div>
+            <div className="mt-1.5 text-sm font-light">
+              <Change now={convert(s.netWorth)} start={startOf(h?.start?.netWorth)} currency={currency} />
             </div>
-            <div className="mt-4 flex flex-wrap gap-x-10 gap-y-3">
+            <div className="mt-5 flex flex-wrap gap-x-10 gap-y-3">
               {buckets.map(b => (
                 <div key={b.label}>
-                  <div className="text-xs text-slate-500">{b.label}</div>
-                  <div className="tabular-nums text-slate-900">{money(convert(b.now), currency)}</div>
-                  <div className="text-xs tabular-nums"><Change now={convert(b.now)} start={startOf(b.start)} currency={currency} /></div>
+                  <div className="text-xs text-muted">{b.label}</div>
+                  <div className="text-base font-medium tabular-nums text-ink">{money(convert(b.now), currency)}</div>
+                  <div className="text-xs font-light"><Change now={convert(b.now)} start={startOf(b.start)} currency={currency} /></div>
                 </div>
               ))}
             </div>
-          </Card>
+          </div>
         )}
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card title="Over time" className="lg:col-span-2"
-            actions={<Segmented value={group} onChange={setGroup} options={[{ value: 'type', label: 'Type' }, { value: 'source', label: 'Source' }]} />}>
-            <div className="h-64">
-              {chart.length ? (
-                <ResponsiveContainer>
-                  <AreaChart data={chart} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                    <CartesianGrid vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="date" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={11} stroke="#94a3b8" minTickGap={40} />
-                    <YAxis tickFormatter={v => compact(v, currency)} tickLine={false} axisLine={false} fontSize={11} stroke="#94a3b8" width={56} />
-                    <Tooltip content={<ChartTooltip currency={currency} labels={labels} />} />
+        <div className="mt-6">
+          <div className="flex justify-end pb-1">
+            <Pills value={group} onChange={setGroup} options={[{ value: 'type', label: 'Type' }, { value: 'source', label: 'Source' }]} />
+          </div>
+          <div className="h-72">
+            {chart.length ? (
+              <ResponsiveContainer>
+                <AreaChart data={chart} margin={{ top: 8, right: 0, bottom: 0, left: 0 }}>
+                  <defs>
                     {(h?.series ?? []).map(x => (
-                      <Area key={x.key} dataKey={x.key} stackId="1" type="monotone" stroke={colorOf(x.key)}
-                        fill={colorOf(x.key)} fillOpacity={0.25} strokeWidth={1.5} isAnimationActive={false} />
+                      <linearGradient key={x.key} id={`fill-${x.key}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={colorOf(x.key)} stopOpacity={0.35} />
+                        <stop offset="100%" stopColor={colorOf(x.key)} stopOpacity={0.08} />
+                      </linearGradient>
                     ))}
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : <p className="text-sm text-slate-400">No data</p>}
-            </div>
-          </Card>
-          <Card title="Allocation">
-            {s && <Allocation slices={s.allocation[group]} currency={currency} convert={convert} colorOf={colorOf} />}
-          </Card>
+                  </defs>
+                  <XAxis dataKey="date" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={11}
+                    tick={{ fill: 'var(--color-faint)' }} minTickGap={56} />
+                  <Tooltip content={<ChartTooltip currency={currency} labels={labels} />}
+                    cursor={{ stroke: 'var(--color-faint)', strokeWidth: 1, strokeDasharray: '3 3' }} />
+                  {(h?.series ?? []).map(x => (
+                    <Area key={x.key} dataKey={x.key} stackId="1" type="monotone" stroke={colorOf(x.key)} strokeWidth={1.25}
+                      fill={`url(#fill-${x.key})`} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+                  ))}
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : <p className="pt-24 text-center text-sm text-faint">No data</p>}
+          </div>
+          <div className="flex justify-center pt-3">
+            <Pills value={range} onChange={setRange} options={RANGES.map(r => ({ value: r, label: r }))} />
+          </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Accounts">{s && <Accounts accounts={s.accounts} currency={currency} convert={convert} />}</Card>
-          <Card title="Holdings">{s && <Holdings holdings={s.holdings} currency={currency} convert={convert} />}</Card>
+        <div className="mt-10 grid gap-8 lg:grid-cols-3">
+          <div className="min-w-0 space-y-8 lg:col-span-2">
+            <Section title="Holdings" flush>{s && <Holdings holdings={s.holdings} currency={currency} convert={convert} />}</Section>
+            {expenses.data && expenses.data.months.length > 0 && <Expenses months={expenses.data.months} current={expenses.data.currentMonth} />}
+          </div>
+          <div className="min-w-0 space-y-8">
+            <Section title="Allocation">{s && <Allocation slices={s.allocation[group]} currency={currency} convert={convert} colorOf={colorOf} />}</Section>
+            <Section title="Accounts" flush>{s && <Accounts accounts={s.accounts} currency={currency} convert={convert} />}</Section>
+          </div>
         </div>
-
-        {expenses.data && expenses.data.months.length > 0 && <Expenses months={expenses.data.months} current={expenses.data.currentMonth} />}
       </main>
     </div>
   );
