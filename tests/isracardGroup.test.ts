@@ -14,6 +14,9 @@ describe('loginOutcome', () => {
 
   it('waits until the site answers', () => {
     expect(loginOutcome([])).toEqual({ state: 'pending' });
+    // the bot block answers with a text page — that's not a wrong password
+    expect(loginOutcome([{ call: 'ValidateIdDataNoReg', body: { status: 'unparsable', message: 'HTTP 200: Block Automation' } }]))
+      .toMatchObject({ state: 'failed', errorType: 'BLOCKED' });
     expect(loginOutcome([validated('1'), { call: 'IsRegisterNoReg', body: { IsRegisterNoRegBean: { returnCode: '1' } } }]))
       .toEqual({ state: 'pending' });
   });

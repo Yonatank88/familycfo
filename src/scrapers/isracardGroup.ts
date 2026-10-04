@@ -14,7 +14,11 @@
  * don't know the difference.
  */
 import puppeteer, { type Browser, type HTTPResponse, type Page } from 'puppeteer';
+import { join } from 'path';
 import { BROWSER_ARGS, describePage, findChromePath, maskAutomation } from './browser.js';
+
+/** Chrome profiles for the card sites (git-ignored, under data/); `BROWSER_PROFILE_DIR` overrides. */
+const PROFILE_DIR = process.env.BROWSER_PROFILE_DIR ?? join('data', 'browser-profile');
 
 export type IsracardGroupCompany = 'isracard' | 'amex';
 
@@ -83,6 +87,8 @@ export function loginOutcome(responses: LoginResponse[]): LoginOutcome {
   const captcha = (b: Json) => str(b.isCaptcha) === 'true';
   for (const { call, body } of responses) {
     const root = obj(body);
+    // Isracard's bot protection answers with a text/HTML page ("Block Automation") instead of JSON
+    if (str(root.status) === 'unparsable') return { state: 'failed', errorType: 'BLOCKED', errorMessage: `${call} answered with a non-JSON page (${str(root.message)})` };
     if (call === 'ValidateIdDataNoReg') {
       if (str(obj(root.Header).Status) !== '1') return { state: 'failed', errorType: 'GENERIC', errorMessage: 'ValidateIdDataNoReg failed' };
       const bean = obj(root.ValidateIdDataNoRegBean);
@@ -182,7 +188,8 @@ export async function loginViaPage(page: Page, company: IsracardGroupCompany, cr
     try {
       responses.push({ call, body: JSON.parse(await response.text()) });
     } catch {
-      responses.push({ call, body: { status: 'unparsable', message: `HTTP ${response.status()}` } });
+      const text = await response.text().catch(() => '');
+      responses.push({ call, body: { status: 'unparsable', message: `HTTP ${response.status()}: ${text.replace(/\s+/g, ' ').slice(0, 80)}` } });
     }
   };
   page.on('response', onResponse);
@@ -546,18 +553,26 @@ export async function scrapeIsracardGroup(options: ScrapeIsracardGroupOptions): 
   let browser: Browser | undefined;
   let page: Page | undefined;
   try {
-    browser = await puppeteer.launch({ headless: !options.showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS });
-    page = await browser.newPage();
+    // A persistent profile keeps Isracard's device cookies between runs, like a person's browser; no
+    // `--enable-automation` switch and no request interception (blocking its detector script is itself a tell).
+    browser = await puppeteer.launch({
+      headless: !options.showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS,
+      ignoreDefaultArgs: ['--enable-automation'], userDataDir: join(PROFILE_DIR, company),
+    });
+    page = (await browser.pages())[0] ?? await browser.newPage();
     page.setDefaultTimeout(120_000);
     await maskAutomation(page);
-    await page.setRequestInterception(true);
-    page.on('request', request => {
-      // the library aborts this bot-detector script too
-      if (request.url().includes('detector-dom.min.js')) void request.abort();
-      else void request.continue();
-    });
 
-    const login = await loginViaPage(page, company, credentials, { requestOtp: options.requestOtp });
+    let login = await loginViaPage(page, company, credentials, { requestOtp: options.requestOtp });
+    // With the browser visible, a login the page won't finish (bot block, CAPTCHA, an unexpected step) can be
+    // finished by hand in the same window; the scrape then continues on that session.
+    if (login.state !== 'success' && options.showBrowser && !(login.state === 'failed' && ['ACCOUNT_BLOCKED', 'CHANGE_PASSWORD'].includes(login.errorType))) {
+      console.log(`\n⚠️  ${company}: ${login.state === 'failed' ? login.errorMessage : 'login did not finish'}`);
+      console.log('   Finish the login by hand in the Chrome window (3 minutes) — the scrape continues once you are in.');
+      const landed = await page.waitForFunction(() => !/\/personalarea\/login/i.test(location.pathname), { timeout: 180_000, polling: 1000 })
+        .then(() => true, () => false);
+      if (landed) login = { state: 'success' };
+    }
     if (login.state !== 'success') {
       const failure = login.state === 'failed' ? login : { errorType: 'GENERIC', errorMessage: 'login did not finish' };
       options.onFailurePage?.(await describePage(page));
