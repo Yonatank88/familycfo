@@ -5,34 +5,9 @@ import { archiveRaw } from './ingest/archive.js';
 import type { InvestmentSource } from './sync/index.js';
 import * as readline from 'readline';
 import type { Page } from 'puppeteer';
-import { existsSync } from 'fs';
-import { platform } from 'os';
-
-function findChromePath(): string | undefined {
-  const paths: Record<string, string[]> = {
-    darwin: [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    ],
-    linux: [
-      '/usr/bin/google-chrome',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-    ],
-    win32: [
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    ],
-  };
-
-  const platformPaths = paths[platform()] || [];
-  for (const p of platformPaths) {
-    if (existsSync(p)) {
-      return p;
-    }
-  }
-  return undefined;
-}
+import type { ScrapedAccount } from './ingest/normalize.js';
+import { BROWSER_ARGS, describePage, findChromePath, maskAutomation } from './scrapers/browser.js';
+import { scrapeIsracardGroup, type IsracardGroupCredentials } from './scrapers/isracardGroup.js';
 
 interface AccountConfig {
   companyId: keyof typeof CompanyTypes;
@@ -119,20 +94,50 @@ async function startOtpWatcher(page: Page, requestOtp: () => Promise<string>): P
   }
 }
 
-// Describe where the browser ended up, for diagnosing failed logins. Uses visible
-// text only (innerText never includes typed input values), so credentials are not logged.
-async function describePage(page: Page): Promise<string> {
-  const lines = [`  URL: ${page.url()}`];
-  for (const frame of page.frames()) {
-    try {
-      const text = await frame.evaluate(() => document.body?.innerText ?? '');
-      const compact = text.replace(/\s+/g, ' ').trim().slice(0, 800);
-      if (compact) lines.push(`  Visible text [${frame.url().slice(0, 80)}]: ${compact}`);
-    } catch {
-      // frame detached mid-navigation; skip it
-    }
-  }
-  return lines.join('\n');
+const ISRACARD_GROUP = new Set(['isracard', 'amex']);
+/** upcoming card charges and future installments */
+const FUTURE_MONTHS = 2;
+
+/** One company through israeli-bank-scrapers. */
+async function libraryScrape(account: AccountConfig, startDate: Date, requestOtp: () => Promise<string>,
+  onPageClose: (description: string) => void) {
+  const scraper = createScraper({
+    companyId: CompanyTypes[account.companyId],
+    startDate,
+    futureMonthsToScrape: FUTURE_MONTHS,
+    // per-transaction detail requests (e.g. Isracard PirteyIska_204) get rate-limited (HTTP 429) as automation
+    additionalTransactionInformation: false,
+    includeRawTransaction: true,
+    verbose: true,
+    combineInstallments: false,
+    showBrowser: process.env.SHOW_BROWSER !== '0',
+    timeout: 120000, // 2 minutes for OTP
+    defaultTimeout: 120000, // 2 minutes for navigation
+    navigationRetryCount: 1,
+    executablePath: findChromePath(),
+    args: BROWSER_ARGS,
+    preparePage: async (page: Page) => {
+      // The library closes the page before returning a failed result, so snapshot it on close
+      const closePage = page.close.bind(page);
+      page.close = async (...args: Parameters<Page['close']>) => {
+        onPageClose(await describePage(page));
+        return closePage(...args);
+      };
+
+      await maskAutomation(page);
+
+      // Start OTP watcher in background for Hapoalim
+      if (account.companyId === 'hapoalim') {
+        startOtpWatcher(page, requestOtp).catch(() => {}); // Fire and forget
+      }
+    },
+  });
+
+  // One Zero without a long-term token (npm run link -- onezero) asks for the SMS code on every scrape
+  const credentials = account.companyId === 'oneZero' && !account.credentials.idToken && !account.credentials.otpLongTermToken
+    ? { ...account.credentials, otpCodeRetriever: requestOtp }
+    : account.credentials;
+  return scraper.scrape(credentials as never);
 }
 
 export interface ScrapeSummary {
@@ -163,94 +168,19 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
     let pageStateAtClose: string | undefined;
 
     try {
-      const scraper = createScraper({
-        companyId: CompanyTypes[account.companyId],
-        startDate,
-        futureMonthsToScrape: 2, // upcoming card charges and future installments
-        // per-transaction detail requests (e.g. Isracard PirteyIska_204) get rate-limited (HTTP 429) as automation
-        additionalTransactionInformation: false,
-        includeRawTransaction: true,
-        verbose: true,
-        combineInstallments: false,
-        showBrowser: process.env.SHOW_BROWSER !== '0',
-        timeout: 120000, // 2 minutes for OTP
-        defaultTimeout: 120000, // 2 minutes for navigation
-        navigationRetryCount: 1,
-        executablePath: findChromePath(),
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-infobars',
-          '--disable-dev-shm-usage',
-          '--no-first-run',
-          '--no-default-browser-check',
-          '--disable-background-networking',
-          '--disable-sync',
-          '--disable-translate',
-          '--hide-scrollbars',
-          '--metrics-recording-only',
-          '--mute-audio',
-          '--safebrowsing-disable-auto-update',
-          '--window-size=1920,1080',
-        ],
-        preparePage: async (page: Page) => {
-          // The library closes the page before returning a failed result, so snapshot it on close
-          const closePage = page.close.bind(page);
-          page.close = async (...args: Parameters<Page['close']>) => {
-            pageStateAtClose = await describePage(page);
-            return closePage(...args);
-          };
-
-          // Use the real browser's user agent (minus "Headless") so it matches the
-          // sec-ch-ua client hints; a hardcoded version mismatch trips bot detection
-          const realUserAgent = await page.browser().userAgent();
-          await page.setUserAgent(realUserAgent.replace('HeadlessChrome', 'Chrome'));
-
-          // Remove webdriver property and other automation flags
-          await page.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-            // Override plugins
-            Object.defineProperty(navigator, 'plugins', {
-              get: () => [
-                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                { name: 'Native Client', filename: 'internal-nacl-plugin' },
-              ],
-            });
-
-            // Override languages
-            Object.defineProperty(navigator, 'languages', {
-              get: () => ['he-IL', 'he', 'en-US', 'en'],
-            });
-
-            // Override permissions
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters: PermissionDescriptor) =>
-              parameters.name === 'notifications'
-                ? Promise.resolve({ state: 'denied' } as PermissionStatus)
-                : originalQuery(parameters);
-          });
-
-          // Set extra HTTP headers
-          await page.setExtraHTTPHeaders({
-            'Accept-Language': 'he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7',
-          });
-
-          // Start OTP watcher in background for Hapoalim
-          if (account.companyId === 'hapoalim') {
-            const ask = hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : promptOtp;
-            startOtpWatcher(page, ask).catch(() => {}); // Fire and forget
-          }
-        },
-      });
-
-      // One Zero without a long-term token (npm run link -- onezero) asks for the SMS code on every scrape
-      const credentials = account.companyId === 'oneZero' && !account.credentials.idToken && !account.credentials.otpLongTermToken
-        ? { ...account.credentials, otpCodeRetriever: hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : promptOtp }
-        : account.credentials;
-      const result = await scraper.scrape(credentials as never);
+      const requestOtp = hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : promptOtp;
+      const result = ISRACARD_GROUP.has(account.companyId)
+        // our own scraper (src/scrapers/isracardGroup.ts): the library's login no longer works there
+        ? await scrapeIsracardGroup({
+          company: account.companyId as 'isracard' | 'amex',
+          credentials: account.credentials as unknown as IsracardGroupCredentials,
+          startDate,
+          futureMonths: FUTURE_MONTHS,
+          showBrowser: process.env.SHOW_BROWSER !== '0',
+          requestOtp,
+          onFailurePage: description => { pageStateAtClose = description; },
+        }).then(r => (r.success ? { ...r, accounts: r.accounts as unknown as ScrapedAccount[] } : r))
+        : await libraryScrape(account, startDate, requestOtp, description => { pageStateAtClose = description; });
 
       if (!result.success) {
         console.error(`Failed to scrape ${account.companyId}:`, result.errorType, result.errorMessage);
