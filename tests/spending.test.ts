@@ -149,7 +149,7 @@ describe('categories in English (step 107)', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-107-${process.pid}.db`;
     openDb(path).close();
     const raw = new Database(path);
-    raw.exec(`DELETE FROM schema_version WHERE version = 107;
+    raw.exec(`DELETE FROM schema_version WHERE version >= 107; DROP TABLE account_balance_daily;
       DELETE FROM category_aliases WHERE name IN ('סופרמרקט', 'מזון וטואלטיקה');
       UPDATE categories SET name = 'מזון וטואלטיקה' WHERE name = 'Groceries & toiletries';
       UPDATE categories SET name = 'סופרמרקט' WHERE name = 'Supermarket';

@@ -93,7 +93,11 @@ export function writeSnapshots(db: DB, outcomes: SourceOutcome[], date = today()
       clear.run(date, o.source);
       for (const r of rows) { insert.run(date, o.source, r.bucket, round(r.value), r.asOf); written++; }
     })();
-    if (o.kind === 'bank') backfilled += backfillBankHistory(db, o.source, date, flagged);
+    if (o.kind === 'bank') {
+      writeAccountBalances(db, o.source, date, flagged);
+      backfilled += backfillBankHistory(db, o.source, date, flagged);
+      backfillAccountBalances(db, o.source, date, flagged);
+    }
   }
   if (flagged.length) console.warn(`  no exchange rate, left out of the snapshot: ${flagged.join(', ')}`);
   return { written, backfilled, flagged };
@@ -168,5 +172,73 @@ export function backfillBankHistory(db: DB, company: string, date: string, flagg
   db.transaction(() => {
     for (const [d, t] of totals) n += (t.exact ? upsert : fill).run(d, company, round(t.value), d).changes;
   })();
+  return n;
+}
+
+const upsertAccountDay = (db: DB) => db.prepare(`INSERT INTO account_balance_daily (date, account_id, balance, currency, value_ils, as_of)
+  VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(date, account_id) DO UPDATE SET balance = excluded.balance, currency = excluded.currency,
+  value_ils = excluded.value_ils, as_of = excluded.as_of`);
+const fillAccountDay = (db: DB) => db.prepare(`INSERT OR IGNORE INTO account_balance_daily (date, account_id, balance, currency, value_ils, as_of)
+  VALUES (?, ?, ?, ?, ?, ?)`);
+
+const bankAccountsOf = (db: DB, company: string) =>
+  db.prepare(`SELECT id, COALESCE(currency, 'ILS') AS currency FROM accounts WHERE company = ? AND kind = 'bank' AND active = 1`)
+    .all(company) as { id: string; currency: string }[];
+
+/** Today's row per bank account of a company that succeeded in this run: its latest balance, valued at today's rate. */
+export function writeAccountBalances(db: DB, company: string, date: string, flagged: string[] = []): number {
+  const latest = db.prepare(`SELECT balance, timestamp FROM balances WHERE account_id = ? ORDER BY id DESC LIMIT 1`);
+  const upsert = upsertAccountDay(db);
+  let n = 0;
+  db.transaction(() => {
+    for (const a of bankAccountsOf(db, company)) {
+      const b = latest.get(a.id) as { balance: number; timestamp: string } | undefined;
+      if (!b) continue;
+      const rate = rateToIls(db, a.currency, date);
+      if (rate == null) { flagged.push(`${a.id} (${a.currency})`); continue; }
+      n += upsert.run(date, a.id, b.balance, a.currency, round(b.balance * rate), sqliteToIso(b.timestamp)).changes;
+    }
+  })();
+  return n;
+}
+
+/**
+ * Each bank account's history before `date`, like the bank snapshots: running balances are exact (they overwrite),
+ * balances walked back from the latest one only fill missing days; the latest balance also fills its own day. Each
+ * day is valued at that day's rate (no rate: left out and flagged).
+ */
+export function backfillAccountBalances(db: DB, company: string, date: string, flagged: string[] = []): number {
+  const until = addDays(date, -1);
+  const latest = db.prepare(`SELECT balance, timestamp FROM balances WHERE account_id = ? ORDER BY id DESC LIMIT 1`);
+  const upsert = upsertAccountDay(db), fill = fillAccountDay(db);
+  let n = 0;
+  db.transaction(() => {
+    for (const a of bankAccountsOf(db, company)) {
+      const { balances, exact } = accountDailyBalances(db, a.id, until);
+      const anchor = latest.get(a.id) as { balance: number; timestamp: string } | undefined;
+      const anchorDay = anchor ? localDate(sqliteToIso(anchor.timestamp)!) : null;
+      if (anchor && anchorDay! <= until && !balances.has(anchorDay!)) balances.set(anchorDay!, anchor.balance);
+      for (const [d, balance] of balances) {
+        const rate = rateToIls(db, a.currency, d);
+        if (rate == null) { flagged.push(`${a.id} on ${d} (${a.currency})`); continue; }
+        n += (exact ? upsert : fill).run(d, a.id, balance, a.currency, round(balance * rate), d).changes;
+      }
+    }
+  })();
+  return n;
+}
+
+/**
+ * A bank whose accounts have no daily rows yet (data from before account_balance_daily) gets them at its latest bank
+ * snapshot's date — a point a successful run already wrote — and the history before it.
+ */
+export function seedAccountBalances(db: DB, flagged: string[] = []): number {
+  const pending = db.prepare(`
+    SELECT s.source, MAX(s.date) AS date FROM daily_snapshots s WHERE s.bucket = 'bank'
+      AND NOT EXISTS (SELECT 1 FROM account_balance_daily d JOIN accounts a ON a.id = d.account_id WHERE a.company = s.source)
+    GROUP BY s.source
+  `).all() as { source: string; date: string }[];
+  let n = 0;
+  for (const p of pending) n += writeAccountBalances(db, p.source, p.date, flagged) + backfillAccountBalances(db, p.source, p.date, flagged);
   return n;
 }

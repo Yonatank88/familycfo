@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { rmSync } from 'fs';
-import { writeSnapshots, backfillBankHistory } from '../src/analytics/snapshots.js';
+import { writeSnapshots, backfillBankHistory, backfillAccountBalances, seedAccountBalances } from '../src/analytics/snapshots.js';
+import { cashFlow } from '../src/analytics/cashflow.js';
 import { history, summary } from '../src/analytics/summary.js';
 import { valueHolding } from '../src/analytics/investments.js';
 import { openDb } from '../src/db/connection.js';
@@ -135,7 +136,7 @@ describe('bank history backfill', () => {
 });
 
 /** The baseline and every step after it. */
-const VERSIONS = [100, 101, 102, 103, 104, 105, 106, 107];
+const VERSIONS = [100, 101, 102, 103, 104, 105, 106, 107, 108];
 
 describe('database', () => {
   it('refuses a database with another schema', () => {
@@ -153,7 +154,7 @@ describe('database', () => {
     const db = new Database(path);
     expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual(VERSIONS);
     // back to the baseline: holdings with the old asset classes and no cost_basis, no reports
-    db.exec(`DELETE FROM schema_version WHERE version > 100; DROP TABLE merchant_categories; DROP TABLE report_values; DROP TABLE reports; DROP TABLE holdings;
+    db.exec(`DELETE FROM schema_version WHERE version > 100; DROP TABLE merchant_categories; DROP TABLE account_balance_daily; DROP TABLE report_values; DROP TABLE reports; DROP TABLE holdings;
       CREATE TABLE holdings (id INTEGER PRIMARY KEY, source TEXT NOT NULL, symbol TEXT NOT NULL, name TEXT, quantity REAL NOT NULL, currency TEXT,
         asset_class TEXT NOT NULL CHECK (asset_class IN ('stock','crypto','stablecoin','broker_cash')), broker TEXT, manual_price REAL,
         manual_price_date TEXT, archived INTEGER NOT NULL DEFAULT 0, synced_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -177,7 +178,7 @@ describe('database', () => {
     openDb(path).close();
     const db = new Database(path);
     // back to 102: the step-102 holdings table (no mutual_fund), with rows
-    db.exec(`DELETE FROM schema_version WHERE version > 102; DROP TABLE merchant_categories; DROP TABLE holdings; ALTER TABLE report_values DROP COLUMN returns;
+    db.exec(`DELETE FROM schema_version WHERE version > 102; DROP TABLE merchant_categories; DROP TABLE account_balance_daily; DROP TABLE holdings; ALTER TABLE report_values DROP COLUMN returns;
       CREATE TABLE holdings (id INTEGER PRIMARY KEY, source TEXT NOT NULL, symbol TEXT NOT NULL, name TEXT, quantity REAL NOT NULL, currency TEXT,
         asset_class TEXT NOT NULL CHECK (asset_class IN ('stock','crypto','stablecoin','broker_cash','pension','study_fund','provident_fund','deposit','other')),
         broker TEXT, manual_price REAL, manual_price_date TEXT, archived INTEGER NOT NULL DEFAULT 0, synced_at TEXT,
@@ -203,7 +204,7 @@ describe('step 104', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-103-${process.pid}.db`;
     openDb(path).close();
     const db = new Database(path);
-    db.exec(`DELETE FROM schema_version WHERE version > 103; DROP TABLE merchant_categories; ALTER TABLE holdings DROP COLUMN opened_at; ALTER TABLE holdings DROP COLUMN cost_basis_source;
+    db.exec(`DELETE FROM schema_version WHERE version > 103; DROP TABLE merchant_categories; DROP TABLE account_balance_daily; ALTER TABLE holdings DROP COLUMN opened_at; ALTER TABLE holdings DROP COLUMN cost_basis_source;
       ALTER TABLE report_values DROP COLUMN returns;
       INSERT INTO holdings (id, source, symbol, quantity, currency, asset_class, cost_basis) VALUES (4, 'ibkr:U1', 'VOO', 10, 'USD', 'stock', 4000)`);
     const before = db.prepare(`SELECT * FROM holdings ORDER BY id`).all();
@@ -221,7 +222,7 @@ describe('step 105', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-104-${process.pid}.db`;
     openDb(path).close();
     const db = new Database(path);
-    db.exec(`DELETE FROM schema_version WHERE version > 104; DROP TABLE merchant_categories; ALTER TABLE report_values DROP COLUMN returns;
+    db.exec(`DELETE FROM schema_version WHERE version > 104; DROP TABLE merchant_categories; DROP TABLE account_balance_daily; ALTER TABLE report_values DROP COLUMN returns;
       INSERT INTO reports (id, sha256, file, status) VALUES (1, 'x', 'f', 'applied');
       INSERT INTO report_values (report_id, holding_source, product_type, balance, currency, as_of) VALUES (1, 'report:x:1', 'pension', 5, 'ILS', '2026-06-30')`);
     const before = db.prepare(`SELECT * FROM report_values`).all();
@@ -271,5 +272,69 @@ describe('Funds: all fund-type money is one top-level type', () => {
     expect(s.holdings.find(h => h.symbol === 'VOO')).toMatchObject({ type: 'stock', subType: null, label: 'VOO' });
     expect(s.accounts.filter(a => a.type === 'funds').map(a => a.label)).toContain('\u2068Alpha Study\u2069 ••0002');
     expect(s.allocation.source.map(x => x.label)).toContain('\u2068Alpha Study\u2069 ••0003');
+  });
+});
+
+describe('per-account daily balances', () => {
+  const days = (db: DB) => db.prepare(`SELECT date, account_id, balance, currency, value_ils FROM account_balance_daily ORDER BY account_id, date`).all();
+
+  it('writes one row per bank account (FX at that day\'s rate) only for sources that succeeded, and backfills history', () => {
+    const db = testDb();
+    addAccount(db, 'oneZero:1', 'bank');
+    addAccount(db, 'oneZero:1-USD', 'bank', 'USD');
+    addAccount(db, 'hapoalim:1', 'bank');
+    for (const [d, r] of [['2026-05-01', 3.6], ['2026-05-02', 3.7], ['2026-05-03', 3.8]] as const) rate(db, d, 'USD', r);
+    // ILS: running balances (exact); USD: walked back from the latest balance over its rows
+    addTx(db, { account: 'oneZero:1', date: '2026-05-01', description: 'a', amount: -100, raw: { runningBalance: 900, valueDate: '2026-05-01' } });
+    addTx(db, { account: 'oneZero:1', date: '2026-05-02', description: 'b', amount: 50, raw: { runningBalance: 950, valueDate: '2026-05-02' } });
+    addBalance(db, 'oneZero:1', 950, '2026-05-03T05:00:00Z');
+    addTx(db, { account: 'oneZero:1-USD', date: '2026-05-02', description: 'fx in', amount: 10 });
+    addBalance(db, 'oneZero:1-USD', 100, '2026-05-03T05:00:00Z');
+    addBalance(db, 'hapoalim:1', 500, '2026-05-03T05:00:00Z');
+    writeSnapshots(db, [{ source: 'oneZero', kind: 'bank', success: true }, { source: 'hapoalim', kind: 'bank', success: false }], '2026-05-03');
+    expect(days(db)).toEqual([
+      { date: '2026-05-01', account_id: 'oneZero:1', balance: 900, currency: 'ILS', value_ils: 900 },
+      { date: '2026-05-02', account_id: 'oneZero:1', balance: 950, currency: 'ILS', value_ils: 950 },
+      { date: '2026-05-03', account_id: 'oneZero:1', balance: 950, currency: 'ILS', value_ils: 950 },
+      { date: '2026-05-02', account_id: 'oneZero:1-USD', balance: 100, currency: 'USD', value_ils: 370 },
+      { date: '2026-05-03', account_id: 'oneZero:1-USD', balance: 100, currency: 'USD', value_ils: 380 },
+    ]);
+  });
+
+  it('running balances overwrite, walked-back days only fill; a day without a rate is left out', () => {
+    const db = testDb();
+    addAccount(db, 'otsarHahayal:1-USD', 'bank', 'USD');
+    rate(db, '2026-05-02', 'USD', 3.7);
+    addTx(db, { account: 'otsarHahayal:1-USD', date: '2026-05-01', description: 'x', amount: 5 });
+    addBalance(db, 'otsarHahayal:1-USD', 20, '2026-05-02T05:00:00Z');
+    db.prepare(`INSERT INTO account_balance_daily VALUES ('2026-05-02', 'otsarHahayal:1-USD', 99, 'USD', 1, NULL)`).run();
+    const flagged: string[] = [];
+    backfillAccountBalances(db, 'otsarHahayal', '2026-05-03', flagged);
+    expect(days(db)).toEqual([
+      { date: '2026-05-01', account_id: 'otsarHahayal:1-USD', balance: 20, currency: 'USD', value_ils: 74 },
+      { date: '2026-05-02', account_id: 'otsarHahayal:1-USD', balance: 99, currency: 'USD', value_ils: 1 },
+    ]);
+    addAccount(db, 'otsarHahayal:1-EUR', 'bank', 'EUR');
+    addBalance(db, 'otsarHahayal:1-EUR', 7, '2026-05-02T05:00:00Z');
+    backfillAccountBalances(db, 'otsarHahayal', '2026-05-03', flagged);
+    expect(flagged).toEqual(['otsarHahayal:1-EUR on 2026-05-02 (EUR)']);
+    expect(days(db)).toHaveLength(2);
+  });
+
+  it('seeds a bank with no rows at its latest bank snapshot; the Bank chart has a line per account with its native balance', () => {
+    const db = testDb();
+    addAccount(db, 'otsarHahayal:1', 'bank');
+    addAccount(db, 'otsarHahayal:1-USD', 'bank', 'USD');
+    rate(db, '2026-05-02', 'USD', 4);
+    addBalance(db, 'otsarHahayal:1', 1000, '2026-05-02T05:00:00Z');
+    addBalance(db, 'otsarHahayal:1-USD', 10, '2026-05-02T05:00:00Z');
+    db.prepare(`INSERT INTO daily_snapshots VALUES ('2026-05-02', 'otsarHahayal', 'bank', 1040, NULL)`).run();
+    expect(seedAccountBalances(db)).toBe(2);
+    expect(seedAccountBalances(db)).toBe(0);
+    const b = cashFlow(db, '1M', undefined, '2026-05-03').balances;
+    expect(b.series.map(s => [s.key, s.currency])).toEqual([['otsarHahayal:1', 'ILS'], ['otsarHahayal:1-USD', 'USD']]);
+    expect(b.points.at(-1)).toEqual({ date: '2026-05-03', values: { 'otsarHahayal:1': 1000, 'otsarHahayal:1-USD': 40 },
+      native: { 'otsarHahayal:1': 1000, 'otsarHahayal:1-USD': 10 } });
+    expect(cashFlow(db, '1M', 'otsarHahayal:1-USD', '2026-05-03').balances.series.map(s => s.key)).toEqual(['otsarHahayal:1-USD']);
   });
 });

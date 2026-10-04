@@ -6,7 +6,7 @@ import { localDate } from './ingest/normalize.js';
 import { matchCurrencyExchanges, matchImmediateCardDebits, matchInternalTransfers, reconcileCardBills } from './ingest/transfers.js';
 import { backfillRates, refreshBoiRates } from './analytics/fx.js';
 import { refreshQuotes } from './analytics/quotes.js';
-import { writeSnapshots, type SourceOutcome } from './analytics/snapshots.js';
+import { seedAccountBalances, writeSnapshots, type SourceOutcome } from './analytics/snapshots.js';
 import { addDays, today } from './util.js';
 
 export interface PipelineOptions {
@@ -53,9 +53,10 @@ export async function runPipeline(db: DB = getDb(), opts: PipelineOptions = {}):
     } catch (err) { console.warn('  merchants not categorised:', (err as Error).message); }
   }
   const snapshots = writeSnapshots(db, opts.sources ?? []);
+  const accountDays = seedAccountBalances(db);
   return {
     categorized, merchantRows, cardBillsKept: cardBills.kept, cardBillsDemoted: cardBills.demoted, immediateDebits: debits.matched, transfers, fxExchanges,
-    snapshots: snapshots.written, bankDaysBackfilled: snapshots.backfilled, fxFlagged: snapshots.flagged.length,
+    snapshots: snapshots.written, bankDaysBackfilled: snapshots.backfilled, accountDaysSeeded: accountDays, fxFlagged: snapshots.flagged.length,
   };
 }
 

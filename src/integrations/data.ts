@@ -9,6 +9,7 @@ export function deleteSourceData(db: DB, source: string, section: 'accounts' | '
         (SELECT id FROM transactions WHERE account_id IN (${accounts}))`).run(source);
       db.prepare(`DELETE FROM transactions WHERE account_id IN (${accounts})`).run(source);
       db.prepare(`DELETE FROM balances WHERE account_id IN (${accounts})`).run(source);
+      db.prepare(`DELETE FROM account_balance_daily WHERE account_id IN (${accounts})`).run(source);
       db.prepare(`DELETE FROM accounts WHERE company = ?`).run(source);
     } else {
       db.prepare(`DELETE FROM holdings WHERE substr(source, 1, length(?) + 1) = ? || ':'`).run(source, source);

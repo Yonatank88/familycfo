@@ -178,6 +178,19 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     );
   ` },
   { version: 107, name: 'categories in English', sql: englishCategoriesSql() },
+  { version: 108, name: 'account_balance_daily', sql: `
+    -- each bank account's end-of-day balance in its own currency, and its value in ILS at that day's rate (a day
+    -- without a rate has no row); written with the snapshots for sources that succeeded, history backfilled like them
+    CREATE TABLE account_balance_daily (
+      date TEXT NOT NULL,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      balance REAL NOT NULL,
+      currency TEXT NOT NULL,
+      value_ils REAL NOT NULL,
+      as_of TEXT,
+      PRIMARY KEY (date, account_id)
+    );
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 

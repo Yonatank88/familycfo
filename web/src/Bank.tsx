@@ -106,14 +106,16 @@ export default function Bank({ range, setRange, currency, convert }: {
   const { data } = useQuery({ queryKey: ['cashflow', range, account], queryFn: () => api.cashFlow(range, account ?? undefined), placeholderData: p => p });
   const chart = useMemo(() => (data?.months ?? []).map(m => ({ month: m.month, in: convert(m.in), out: -convert(m.out), net: convert(m.net) })), [data, convert]);
   const balances = useMemo(() => (data?.balances.points ?? []).map(p => ({
-    date: p.date, ...Object.fromEntries(Object.entries(p.values).map(([k, v]) => [k, convert(v)])),
+    date: p.date, native: p.native, ...Object.fromEntries(Object.entries(p.values).map(([k, v]) => [k, convert(v)])),
   })), [data, convert]);
   if (!data) return null;
 
   const series = data.balances.series;
+  const currencyOf = (key: string) => series.find(s => s.key === key)?.currency ?? 'ILS';
   const colorOf = (key: string) => PALETTE[Math.max(0, series.findIndex(s => s.key === key)) % PALETTE.length];
   const balanceConfig = Object.fromEntries(series.map(s => [s.key, { label: s.label }])) satisfies ChartConfig;
   const latest = data.balances.points.at(-1)?.values ?? {};
+  const latestNative = data.balances.points.at(-1)?.native ?? {};
   const accountLabel = data.accounts.find(a => a.id === account)?.label ?? 'All accounts';
   const t = data.totals;
   // spend by category, once any of it has one
@@ -163,12 +165,20 @@ export default function Bank({ range, setRange, currency, convert }: {
                 content={({ active, payload, label }) => active && payload?.length ? (
                   <div className="min-w-44 rounded-xl border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
                     <div className="mb-1.5 text-muted">{day(String(label))}</div>
-                    {payload.map(p => (
-                      <div key={String(p.dataKey)} className="flex items-center justify-between gap-6 py-0.5">
-                        <span className="flex items-center gap-1.5 text-muted"><Dot color={colorOf(String(p.dataKey))} className="h-1.5 w-1.5" /><Name text={balanceConfig[String(p.dataKey)]?.label ?? ''} /></span>
-                        <span className="tabular-nums text-ink">{money(Number(p.value), currency)}</span>
-                      </div>
-                    ))}
+                    {payload.map(p => {
+                      const key = String(p.dataKey);
+                      const fx = currencyOf(key) !== 'ILS';
+                      const native = (p.payload as { native?: Record<string, number> } | undefined)?.native?.[key];
+                      return (
+                        <div key={key} className="flex items-center justify-between gap-6 py-0.5">
+                          <span className="flex items-center gap-1.5 text-muted"><Dot color={colorOf(key)} className="h-1.5 w-1.5" /><Name text={balanceConfig[key]?.label ?? ''} /></span>
+                          <span className="text-right tabular-nums text-ink">
+                            {fx && native != null && <span className="mr-2 text-muted">{money(native, currencyOf(key))}</span>}
+                            {money(Number(p.value), currency)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : null} />
               {series.map(s => (
@@ -183,6 +193,7 @@ export default function Bank({ range, setRange, currency, convert }: {
             <li key={s.key} className="flex items-center gap-2 py-0.5">
               <Dot color={colorOf(s.key)} />
               <span className="min-w-0 flex-1 truncate text-ink"><Name text={s.label} /></span>
+              {s.currency !== 'ILS' && latestNative[s.key] != null && <span className="text-xs tabular-nums text-muted">{money(latestNative[s.key], s.currency)}</span>}
               <span className="tabular-nums text-ink">{latest[s.key] == null ? '—' : money(convert(latest[s.key]), currency)}</span>
             </li>
           ))}

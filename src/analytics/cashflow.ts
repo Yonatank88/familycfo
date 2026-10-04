@@ -1,5 +1,4 @@
 import type { DB } from '../db/connection.js';
-import { SOURCE_NAMES } from '../db/ingestRepo.js';
 import { localDate } from '../ingest/normalize.js';
 import { addDays, cleanMerchantName, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
@@ -68,8 +67,8 @@ export function flowTotals(rows: FlowRow[]) {
 }
 
 /**
- * `/api/cashflow`: the range's months (in / out / net / moved), its spend by category, the bank accounts, and each account's daily balance from
- * the snapshots (one line per bank — the snapshots are per bank, carried over days without one).
+ * `/api/cashflow`: the range's months (in / out / net / moved), its spend by category, the bank accounts, and each bank account's daily
+ * balance (account_balance_daily: ILS value and the native balance, carried over days without a row).
  */
 export function cashFlow(db: DB, range: Range, account?: string, asOf = today()) {
   const accounts = bankAccounts(db);
@@ -80,23 +79,20 @@ export function cashFlow(db: DB, range: Range, account?: string, asOf = today())
   const months = monthsBetween([start.slice(0, 7), first?.slice(0, 7) ?? start.slice(0, 7)].sort()[1], asOf.slice(0, 7)).map(month => ({ month, ...flowTotals(rows.filter(r => r.month === month)) }));
   const inRange = rows.filter(r => r.month >= start.slice(0, 7));
 
-  // balances: daily_snapshots' bank bucket per company, over the range
-  const companies = [...new Set(accounts.filter(a => !account || a.id === account).map(a => a.company))];
-  const label = (company: string) => {
-    const own = accounts.filter(a => a.company === company);
-    return own.length === 1 ? own[0].label : SOURCE_NAMES[company] ?? company;
-  };
-  const snaps = db.prepare(`SELECT date, source, value_ils FROM daily_snapshots WHERE bucket = 'bank' AND date <= ? ORDER BY date`)
-    .all(asOf) as { date: string; source: string; value_ils: number }[];
-  const by = new Map(companies.map(c => [c, new Map<string, number>()]));
-  for (const s of snaps) by.get(s.source)?.set(s.date, s.value_ils);
-  const points: { date: string; values: Record<string, number> }[] = [];
-  const last: Record<string, number> = {};
-  const firstSnap = snaps.find(s => by.has(s.source))?.date;
-  if (firstSnap) {
-    for (let d = firstSnap; d <= asOf; d = addDays(d, 1)) {
-      for (const c of companies) { const v = by.get(c)!.get(d); if (v != null) last[c] = v; }
-      if (d >= start) points.push({ date: d, values: { ...last } });
+  // balances: one line per bank account (FX accounts too) from account_balance_daily, carried over days without a row
+  const shown = accounts.filter(a => !account || a.id === account);
+  const ids = new Set(shown.map(a => a.id));
+  const days = (db.prepare(`SELECT date, account_id, balance, currency, value_ils FROM account_balance_daily WHERE date <= ? ORDER BY date`)
+    .all(asOf) as { date: string; account_id: string; balance: number; currency: string; value_ils: number }[]).filter(r => ids.has(r.account_id));
+  const byDay = new Map<string, typeof days>();
+  for (const r of days) byDay.set(r.date, [...(byDay.get(r.date) ?? []), r]);
+  const currencyOf = new Map(days.map(r => [r.account_id, r.currency]));
+  const points: { date: string; values: Record<string, number>; native: Record<string, number> }[] = [];
+  const last: Record<string, number> = {}, lastNative: Record<string, number> = {};
+  if (days.length) {
+    for (let d = days[0].date; d <= asOf; d = addDays(d, 1)) {
+      for (const r of byDay.get(d) ?? []) { last[r.account_id] = r.value_ils; lastNative[r.account_id] = r.balance; }
+      if (d >= start) points.push({ date: d, values: { ...last }, native: { ...lastNative } });
     }
   }
   return {
@@ -106,7 +102,10 @@ export function cashFlow(db: DB, range: Range, account?: string, asOf = today())
     // the range's spend (expense / refund rows) by top-level category
     categories: byCategory(inRange.filter(r => r.kind === 'expense' || r.kind === 'refund').map(r => ({ amount: -r.amount, category: r.category })), 6),
     months,
-    balances: { series: companies.filter(c => by.get(c)!.size).map(c => ({ key: c, label: label(c) })), points },
+    balances: {
+      series: shown.filter(a => currencyOf.has(a.id)).map(a => ({ key: a.id, label: a.label, company: a.company, currency: currencyOf.get(a.id)! })),
+      points,
+    },
   };
 }
 

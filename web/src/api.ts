@@ -84,8 +84,11 @@ export interface CashFlow {
   /** the range's spend by top-level category */
   categories: Ranked[];
   months: (FlowTotals & { month: string })[];
-  /** daily balance per bank (the snapshots are per bank), ILS */
-  balances: { series: { key: string; label: string }[]; points: { date: string; values: Record<string, number> }[] };
+  /** daily balance per bank account: values in ILS, native in the account's currency */
+  balances: {
+    series: { key: string; label: string; company: string; currency: string }[];
+    points: { date: string; values: Record<string, number>; native: Record<string, number> }[];
+  };
 }
 export interface FlowRow { id: number; date: string; description: string; account: string; amount: number }
 export interface CashFlowRows { month: string; in: FlowRow[]; out: FlowRow[]; moved: FlowRow[] }
