@@ -80,6 +80,9 @@ export async function maskAutomation(page: Page): Promise<void> {
     });
   }
 
+  // tsx compiles with keepNames: a named function inside page.evaluate() calls __name(), which pages don't define
+  // (e.g. Isracard's OTP-box lookup threw and was read as "no OTP box")
+  await page.evaluateOnNewDocument('globalThis.__name = globalThis.__name || (f => f)');
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     Object.defineProperty(navigator, 'plugins', {

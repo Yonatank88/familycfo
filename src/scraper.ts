@@ -10,6 +10,7 @@ import type { ScrapedAccount } from './ingest/normalize.js';
 import puppeteer from 'puppeteer';
 import { BROWSER_ARGS, describePage, findChromePath, maskAutomation, profileDir } from './scrapers/browser.js';
 import { scrapeIsracardGroup, type IsracardGroupCredentials } from './scrapers/isracardGroup.js';
+import { scrapeCal, type CalCredentials } from './scrapers/cal.js';
 import { markSubmit, startHapoalimWatcher } from './scrapers/hapoalim.js';
 
 interface AccountConfig {
@@ -57,7 +58,7 @@ export function isUnattended(hasOtpHook: boolean, stdinIsTTY = !!process.stdin.i
   return !hasOtpHook && (!stdinIsTTY || env.UNATTENDED === '1');
 }
 
-/** Login refusals after which another try may count toward Isracard's lockout. */
+/** Login refusals after which another try may count toward a card company's lockout. */
 const LOCKOUT_ERRORS = ['BLOCKED', 'INVALID_PASSWORD', 'ACCOUNT_BLOCKED'];
 
 /**
@@ -109,9 +110,11 @@ async function promptOtp(label: string): Promise<string> {
 }
 
 const ISRACARD_GROUP = new Set(['isracard', 'amex']);
+/** card companies on our own login-page scrapers (src/scrapers/): visible browser, lockout guard */
+const OWN_LOGIN = new Set([...ISRACARD_GROUP, 'visaCal']);
 /** always in a visible browser, even with SHOW_BROWSER=0: Isracard blocks headless Chrome at performLogonI, after the
- * password was already checked — so a headless try can count toward the lockout */
-const ALWAYS_HEADFUL = ISRACARD_GROUP;
+ * password was already checked — so a headless try can count toward the lockout; Cal's login is treated the same */
+const ALWAYS_HEADFUL = OWN_LOGIN;
 const showBrowserFor = (company: string) => ALWAYS_HEADFUL.has(company) || process.env.SHOW_BROWSER !== '0';
 /** run in their own Chrome profile under data/browser-profile/<source id> */
 const PERSISTENT_PROFILE = new Set(['hapoalim']);
@@ -215,8 +218,8 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
     const startedAt = new Date().toISOString();
     const unattended = hooks.unattended ?? isUnattended(!!hooks.requestOtp);
 
-    // Isracard / Amex: after a refused login, only a person (dashboard Refresh, CLI in a terminal) tries again
-    const refusal = unattended && ISRACARD_GROUP.has(account.companyId) ? lockoutGuard(db, source) : null;
+    // Isracard / Amex / Cal: after a refused login, only a person (dashboard Refresh, CLI in a terminal) tries again
+    const refusal = unattended && OWN_LOGIN.has(account.companyId) ? lockoutGuard(db, source) : null;
     if (refusal) {
       const errorMessage = `skipped unattended after "${refusal.slice(0, 120)}" — run it once from the dashboard Refresh`;
       console.error(`Skipping ${source}: ${NEEDS_ATTENTION} ${errorMessage}`);
@@ -243,6 +246,18 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
           showBrowser: showBrowserFor(account.companyId),
           requestOtp,
           // the login is submitted once; unattended, nobody finishes it by hand
+          finishByHand: !unattended,
+          onFailurePage: description => { pageStateAtClose = description; },
+        }).then(r => (r.success ? { ...r, accounts: r.accounts as unknown as ScrapedAccount[] } : r))
+        : account.companyId === 'visaCal'
+        // our own scraper (src/scrapers/cal.ts): drives Cal's login popup, one Chrome profile per login
+        ? await scrapeCal({
+          profile: source,
+          credentials: account.credentials as unknown as CalCredentials,
+          startDate,
+          futureMonths: FUTURE_MONTHS,
+          showBrowser: showBrowserFor(account.companyId),
+          requestOtp,
           finishByHand: !unattended,
           onFailurePage: description => { pageStateAtClose = description; },
         }).then(r => (r.success ? { ...r, accounts: r.accounts as unknown as ScrapedAccount[] } : r))

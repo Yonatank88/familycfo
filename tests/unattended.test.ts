@@ -51,6 +51,20 @@ describe('Isracard lockout guard', () => {
     expect(calls).toBe(2);
   });
 
+  it('guards each Cal login by its own source id', async () => {
+    const db = testDb();
+    const cal = { accounts: [
+      { id: 'visaCal', companyId: 'visaCal', credentials: { username: 'u', password: 'p' } },
+      { id: 'visaCal-hagar', companyId: 'visaCal', credentials: { username: 'u', password: 'p' } },
+    ] } as never;
+    recordSourceRun(db, { source: 'visaCal-hagar', startedAt: at(1), ok: false, error: 'INVALID_PASSWORD: שם המשתמש או הסיסמה שהוזנו שגויים' });
+    const ran: string[] = [];
+    const runCompany = async (account: { id?: string }) => { ran.push(account.id!); return { success: true as const, accounts: [] }; };
+    const results = await scrapeAll(cal, db, { unattended: true, runCompany: runCompany as never });
+    expect(ran).toEqual(['visaCal']);
+    expect(results.map(r => [r.company, r.errorType ?? 'ok'])).toEqual([['visaCal', 'ok'], ['visaCal-hagar', NEEDS_ATTENTION]]);
+  });
+
   it('INVALID_PASSWORD guards too; other failures and other sources do not', async () => {
     const db = testDb();
     recordSourceRun(db, { source: 'isracard', startedAt: at(1), ok: false, error: 'GENERIC: timeout' });
