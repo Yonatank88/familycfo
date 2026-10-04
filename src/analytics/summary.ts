@@ -1,7 +1,7 @@
 import type { DB } from '../db/connection.js';
 import { SOURCE_NAMES } from '../db/ingestRepo.js';
 import { localDate } from '../ingest/normalize.js';
-import { addDays, merchantKey, round, today } from '../util.js';
+import { addDays, cleanMerchantName, merchantKey, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
 import { holdingValues } from './investments.js';
 
@@ -155,6 +155,8 @@ export function summary(db: DB, asOf = today()) {
 
   const accounts: {
     id: string; source: string; sourceLabel: string; label: string; kind: 'bank' | 'card' | 'investment';
+    /** bank, cards_owed, or the holdings' asset class (a source's largest) — what the sidebar groups by */
+    assetClass: string;
     valueIls: number | null; value: number | null; currency: string; asOf: string | null; lastSuccessAt: string | null; stale: boolean; fxMissing: boolean;
   }[] = [];
   const bankAccounts = db.prepare(`
@@ -165,7 +167,7 @@ export function summary(db: DB, asOf = today()) {
   for (const a of bankAccounts) {
     const rate = rateToIls(db, a.currency, asOf);
     accounts.push({
-      id: a.id, source: a.company, sourceLabel: sourceLabel(a.company), label: a.display_name ?? a.id, kind: 'bank',
+      id: a.id, source: a.company, sourceLabel: sourceLabel(a.company), label: (a.display_name ?? a.id).replace(/\s*···\s*/, ' ••'), kind: 'bank', assetClass: 'bank',
       value: a.balance, currency: a.currency, valueIls: a.balance == null || rate == null ? null : round(a.balance * rate),
       asOf: a.timestamp ? `${a.timestamp.replace(' ', 'T')}Z` : null, lastSuccessAt: status.get(a.company)?.last_ok ?? null,
       stale: stale(a.company), fxMissing: a.balance != null && rate == null,
@@ -174,7 +176,7 @@ export function summary(db: DB, asOf = today()) {
   const cardsBySource = new Map<string, number>();
   for (const s of now.filter(x => x.bucket === 'cards_owed')) cardsBySource.set(s.source, (cardsBySource.get(s.source) ?? 0) + s.value_ils);
   for (const [source, v] of cardsBySource) {
-    accounts.push({ id: `${source}:cards`, source, sourceLabel: sourceLabel(source), label: `${sourceLabel(source)} cards owed`, kind: 'card',
+    accounts.push({ id: `${source}:cards`, source, sourceLabel: sourceLabel(source), label: `${sourceLabel(source)} cards owed`, kind: 'card', assetClass: 'cards_owed',
       value: round(v), currency: 'ILS', valueIls: round(v), asOf: status.get(source)?.as_of ?? null,
       lastSuccessAt: status.get(source)?.last_ok ?? null, stale: stale(source), fxMissing: false });
   }
@@ -186,21 +188,23 @@ export function summary(db: DB, asOf = today()) {
     ...now.filter(s => INVESTMENT_BUCKETS.has(s.bucket)).map(s => s.source)])].filter(s => !isReport(s));
   for (const source of investmentSources) {
     const v = sumWhere(now, s => s.source === source && INVESTMENT_BUCKETS.has(s.bucket));
+    const largest = holdings.filter(h => h.source === source).sort((a, b) => (b.valueIls ?? 0) - (a.valueIls ?? 0))[0];
     accounts.push({ id: source, source, sourceLabel: sourceLabel(source), label: sourceLabel(source), kind: 'investment',
+      assetClass: largest?.assetClass ?? 'stock',
       value: round(v), currency: 'ILS', valueIls: round(v), asOf: status.get(source)?.as_of ?? null,
       lastSuccessAt: status.get(source)?.last_ok ?? null, stale: stale(source),
       fxMissing: holdings.some(h => h.source === source && h.valueIls == null) });
   }
   for (const h of holdings.filter(x => x.source === 'report')) {
     accounts.push({ id: h.holdingSource, source: h.holdingSource, sourceLabel: h.broker ?? 'Report', label: h.symbol, kind: 'investment',
-      value: h.value, currency: h.currency, valueIls: h.valueIls, asOf: h.priceDate, lastSuccessAt: null, stale: false, fxMissing: h.valueIls == null });
+      assetClass: h.assetClass, value: h.value, currency: h.currency, valueIls: h.valueIls, asOf: h.priceDate, lastSuccessAt: null, stale: false, fxMissing: h.valueIls == null });
   }
   // a source that never succeeded (e.g. a bank that needs its OTP)
   const shown = new Set(accounts.map(a => a.source));
   for (const s of status.values()) {
     if (shown.has(s.source)) continue;
     accounts.push({ id: s.source, source: s.source, sourceLabel: sourceLabel(s.source), label: sourceLabel(s.source), kind: 'bank',
-      value: null, currency: 'ILS', valueIls: null, asOf: null, lastSuccessAt: s.last_ok, stale: true, fxMissing: false });
+      assetClass: 'bank', value: null, currency: 'ILS', valueIls: null, asOf: null, lastSuccessAt: s.last_ok, stale: true, fxMissing: false });
   }
 
   const invested = holdings.reduce((a, h) => a + (h.valueIls ?? 0), 0);
@@ -285,7 +289,7 @@ export function expenses(db: DB, months = 12, asOf = today()) {
         month,
         total: round(list.reduce((a, r) => a + r.amount, 0)),
         merchants: [...merchants].sort((a, b) => b[1].total - a[1].total).slice(0, 8).map(([key, m]) => ({
-          key, name: [...m.names].sort((a, b) => b[1] - a[1])[0][0], total: round(m.total), count: m.count,
+          key, name: cleanMerchantName([...m.names].sort((a, b) => b[1] - a[1])[0][0]), total: round(m.total), count: m.count,
         })),
       };
     }),

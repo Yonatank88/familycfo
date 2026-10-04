@@ -1,5 +1,6 @@
 import type { DB } from './connection.js';
 import { dateKey, normalizeTransactions, type NormalizedTransaction, type ScrapedAccount } from '../ingest/normalize.js';
+import { maskLast4 } from '../util.js';
 
 export interface SaveResult {
   insertedIds: number[];
@@ -170,14 +171,14 @@ export const SOURCE_NAMES: Record<string, string> = {
   behatsdaa: 'Behatsdaa', ibkr: 'IBKR', binance: 'Binance', kraken: 'Kraken', wallets: 'Wallets',
 };
 
-/** "hapoalim:12-345-678901" → "Hapoalim ···8901" */
+/** "hapoalim:12-345-678901" → "Hapoalim ••8901" */
 export function friendlyAccountName(accountId: string): string {
   const [company, number = ''] = accountId.split(':');
   const name = SOURCE_NAMES[company] ?? company;
   const deposit = number.match(/^(.*)-ID_(\d+)$/);
-  if (deposit) return `${name} savings ${deposit[2]} ···${deposit[1].replace(/\D/g, '').slice(-4)}`;
+  if (deposit) return `${name} savings ${deposit[2]} ${maskLast4(deposit[1])}`;
   const fx = number.match(/^(.*)-([A-Z]{3})$/);
   if (fx) return `${name} ${fx[2]}`;
   const digits = number.replace(/\D/g, '');
-  return `${name} ···${digits.slice(-4) || number}`;
+  return `${name} ${digits ? maskLast4(digits) : number}`;
 }

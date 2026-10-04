@@ -19,3 +19,25 @@ export function merchantKey(description: string): string {
     .join(' ')
     .trim() || description.trim().toLowerCase();
 }
+
+/** "••1234": the last 4 digits of an account / card number, the one way they are shown. */
+export const maskLast4 = (number: string | null | undefined) => {
+  const digits = String(number ?? '').replace(/\D/g, '');
+  return digits ? `••${digits.slice(-4)}` : '';
+};
+
+/**
+ * A merchant's name as shown: card-statement noise removed — a numeric reference before or after the name
+ * ("12345678/ACME", "ACME/1234", "ACME 456", "4521 - ACME"), the installment note on a second line, stray separators.
+ */
+export function cleanMerchantName(description: string): string {
+  const name = description
+    .split(/\r?\n/)[0]
+    .replace(/^(?:\d{3,}\s*[/\-–]\s*)+/, '')
+    .replace(/(?:\s*[\s/\-–]\s*\d{3,})+$/, '')
+    .replace(/\/\d+$/, '')
+    .replace(/^[\s/\-–*|]+|[\s/\-–*|]+$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return name || description.trim();
+}

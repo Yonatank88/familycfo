@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Catalog, type ConfigEntry, type Draft, type FieldSpec, type IntegrationType } from './api';
 import { useScrape } from './Layout';
-import { Panel, button, primaryButton } from './ui';
+import { SidePanel, Tip, button, primaryButton } from './ui';
 
 export type EditorMode = { kind: 'add' } | { kind: 'edit'; key: string };
 
@@ -100,11 +100,6 @@ export default function IntegrationEditor({ mode, onClose }: { mode: EditorMode;
   const [keepData, setKeepData] = useState(true);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  useEffect(() => {
     if (entry && !draft) setDraft({ type: entry.type, companyId: entry.companyId, exchange: entry.exchange, fields: {}, networks: entry.networks, wallets: entry.wallets });
   }, [entry, draft]);
 
@@ -130,18 +125,24 @@ export default function IntegrationEditor({ mode, onClose }: { mode: EditorMode;
   const catalog = data?.catalog;
 
   return (
-    <Panel onClose={onClose}>
-      <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-6">
-        <div className="min-w-0">
-          <div className="text-xs text-muted">{mode.kind === 'add' ? 'Add integration' : 'Edit integration'}</div>
-          <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-ink">
-            {entry?.label ?? (catalog && draft ? titleOf(catalog, draft) : 'Choose a source')}
-          </h2>
-        </div>
-        <button type="button" onClick={onClose} className="rounded-lg px-3 py-1 text-xs font-medium text-muted hover:bg-ink/5 hover:text-ink">Close</button>
-      </div>
-
-      <div className="flex-1 space-y-5 overflow-y-auto px-6 pb-6">
+    <SidePanel onClose={onClose} kicker={mode.kind === 'add' ? 'Add integration' : 'Edit integration'}
+      title={entry?.label ?? (catalog && draft ? titleOf(catalog, draft) : 'Choose a source')}
+      footer={draft && <>
+          <div className="flex items-center gap-3">
+            {entry && <button type="button" onClick={() => setRemoving(true)} className="min-h-9 font-medium text-muted hover:text-down">Remove</button>}
+            {entry && (
+              <button type="button" disabled={busy} onClick={() => run(api.disableIntegration(entry.key, !entry.disabled), false)} className="min-h-9 font-medium text-muted hover:text-ink">
+                {entry.disabled ? 'Enable' : 'Disable'}
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {error && <Tip content={error}><span tabIndex={0} className="max-w-60 truncate text-down">{error}</span></Tip>}
+            <button type="button" disabled={busy || testing || scrape.running} onClick={test} className={button}>{testing ? 'Testing…' : 'Test connection'}</button>
+            <button type="submit" form="integration" disabled={busy || testing} className={primaryButton}>Save</button>
+          </div>
+      </>}>
+      <div className="space-y-5">
         {catalog && !draft && mode.kind === 'add' && <Picker catalog={catalog} onPick={setDraft} />}
         {catalog && draft && (
           <form id="integration" className="space-y-4" autoComplete="off" onSubmit={e => { e.preventDefault(); save(); }}>
@@ -189,7 +190,7 @@ export default function IntegrationEditor({ mode, onClose }: { mode: EditorMode;
                           onChange={e => setDraft({ ...draft, wallets: draft.wallets!.map((x, j) => (j === i ? { ...x, address: e.target.value } : x)) })} />
                         <input value={w.label ?? ''} placeholder="Label" className={`${input} min-w-0 flex-[2]`}
                           onChange={e => setDraft({ ...draft, wallets: draft.wallets!.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} />
-                        <button type="button" aria-label="Remove wallet" className="shrink-0 rounded-lg px-2 text-muted hover:text-down"
+                        <button type="button" aria-label="Remove wallet" className="min-h-9 shrink-0 rounded-lg px-2 text-muted hover:text-down"
                           onClick={() => setDraft({ ...draft, wallets: draft.wallets!.filter((_, j) => j !== i) })}>×</button>
                       </div>
                     ))}
@@ -221,24 +222,6 @@ export default function IntegrationEditor({ mode, onClose }: { mode: EditorMode;
           </div>
         )}
       </div>
-
-      {draft && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-6 py-3 text-xs">
-          <div className="flex items-center gap-3">
-            {entry && <button type="button" onClick={() => setRemoving(true)} className="font-medium text-muted hover:text-down">Remove</button>}
-            {entry && (
-              <button type="button" disabled={busy} onClick={() => run(api.disableIntegration(entry.key, !entry.disabled), false)} className="font-medium text-muted hover:text-ink">
-                {entry.disabled ? 'Enable' : 'Disable'}
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {error && <span className="max-w-60 truncate text-down" title={error}>{error}</span>}
-            <button type="button" disabled={busy || testing || scrape.running} onClick={test} className={button}>{testing ? 'Testing…' : 'Test connection'}</button>
-            <button type="submit" form="integration" disabled={busy || testing} className={primaryButton}>Save</button>
-          </div>
-        </div>
-      )}
-    </Panel>
+    </SidePanel>
   );
 }

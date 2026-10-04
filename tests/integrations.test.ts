@@ -8,8 +8,13 @@ const NOW = Date.parse('2026-05-10T12:00:00Z');
 const hoursAgo = (h: number) => new Date(NOW - h * 3600_000).toISOString();
 
 describe('integration status', () => {
-  it('is Not configured when credentials are missing, whatever the runs say', () => {
-    expect(integrationStatus({ configured: false, lastRunOk: true, lastSuccessAt: hoursAgo(1) }, NOW)).toBe('not_configured');
+  it('is Not configured when credentials are missing and it never succeeded', () => {
+    expect(integrationStatus({ configured: false, lastRunOk: null, lastSuccessAt: null }, NOW)).toBe('not_configured');
+    expect(integrationStatus({ configured: false, lastRunOk: false, lastSuccessAt: null }, NOW)).toBe('not_configured');
+  });
+  it('treats empty credentials with successful runs (a login typed in the browser) as configured', () => {
+    expect(integrationStatus({ configured: false, lastRunOk: true, lastSuccessAt: hoursAgo(1) }, NOW)).toBe('ok');
+    expect(integrationStatus({ configured: false, lastRunOk: false, lastSuccessAt: hoursAgo(5) }, NOW)).toBe('failed');
   });
   it('is Failed when the latest run failed', () => {
     expect(integrationStatus({ configured: true, lastRunOk: false, lastSuccessAt: hoursAgo(2) }, NOW)).toBe('failed');

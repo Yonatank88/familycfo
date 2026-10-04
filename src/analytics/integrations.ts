@@ -31,10 +31,14 @@ export function configuredSources(config: Config | null): ConfiguredSource[] {
   return [...banks, ...investments];
 }
 
-/** Disabled › Not configured (credentials missing) › Failed (the latest run failed) › Stale (no success in 36 h) › OK. */
+/**
+ * Disabled › Not configured (credentials missing and it never succeeded — a bank logged into by hand in the browser,
+ * like Hapoalim with empty credentials, is configured once it has a successful run) › Failed (the latest run failed) ›
+ * Stale (no success in 36 h) › OK.
+ */
 export function integrationStatus(x: { configured: boolean; disabled?: boolean; lastRunOk: boolean | null; lastSuccessAt: string | null }, now = Date.now()): IntegrationStatus {
   if (x.disabled) return 'disabled';
-  if (!x.configured) return 'not_configured';
+  if (!x.configured && !x.lastSuccessAt) return 'not_configured';
   if (x.lastRunOk === false) return 'failed';
   if (!x.lastSuccessAt || now - Date.parse(x.lastSuccessAt) > STALE_MS) return 'stale';
   return 'ok';

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { expenseRowsOf, expenses } from '../src/analytics/summary.js';
+import { cleanMerchantName } from '../src/util.js';
 import { addAccount, addTx, testDb } from './helpers.js';
 
 describe('expenses', () => {
@@ -30,6 +31,7 @@ describe('expenses', () => {
     const april = expenses(db, 12, '2026-05-15').months[0];
     expect(april.merchants[0]).toMatchObject({ key: 'shufersal', total: 250, count: 3 });
     expect(april.merchants.map(m => m.key)).toEqual(['shufersal', 'cafe']);
+    expect(april.merchants[0].name).toBe('Shufersal');
   });
 
   it('lists the rows of a month and merchant', () => {
@@ -40,5 +42,25 @@ describe('expenses', () => {
 
   it('keeps only the last N months with data', () => {
     expect(expenses(db, 1, '2026-05-15').months.map(m => m.month)).toEqual(['2026-05']);
+  });
+});
+
+describe('merchant name cleaner', () => {
+  it('drops a numeric reference after the name', () => {
+    expect(cleanMerchantName('ACME STORE/123456')).toBe('ACME STORE');
+    expect(cleanMerchantName('Shufersal 456')).toBe('Shufersal');
+    expect(cleanMerchantName('PAYPAL *SPOTIFY - 4521')).toBe('PAYPAL *SPOTIFY');
+  });
+  it('drops a numeric reference before the name (Hebrew statements put it first)', () => {
+    expect(cleanMerchantName('12345678/1234/סופר פארם')).toBe('סופר פארם');
+    expect(cleanMerchantName('4521 - רמי לוי שיווק')).toBe('רמי לוי שיווק');
+  });
+  it('drops the installment note on a second line', () => {
+    expect(cleanMerchantName('4521 - איקאה נתניה\n(תשלום 2 מתוך 3)')).toBe('איקאה נתניה');
+  });
+  it('keeps short numbers that are part of the name, and never returns empty', () => {
+    expect(cleanMerchantName('7 Eleven')).toBe('7 Eleven');
+    expect(cleanMerchantName('Cafe 12')).toBe('Cafe 12');
+    expect(cleanMerchantName('123456')).toBe('123456');
   });
 });

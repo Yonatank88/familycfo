@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ReportDetail, type ReportItem, type ReportStatus } from './api';
+import { Upload } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { day, money } from './format';
-import { Panel, UploadIcon, button, primaryButton } from './ui';
+import { SidePanel, Tip, button, mask, primaryButton } from './ui';
 
 const PRODUCT_TYPES: Record<string, string> = {
-  pension: 'Pension', study_fund: 'Study fund', provident_fund: 'Provident fund', mutual_fund: 'Fund', brokerage: 'Brokerage', deposit: 'Deposit',
+  pension: 'Pension', study_fund: 'Study fund', provident_fund: 'Provident fund', mutual_fund: 'Mutual fund', brokerage: 'Brokerage', deposit: 'Deposit',
   other: 'Other',
 };
 const STATUS: Record<ReportStatus, { label: string; className: string }> = {
@@ -43,18 +45,15 @@ export function AddReport() {
       const file = e.dataTransfer?.files[0];
       if (file) upload(file);
     };
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragleave', leave);
     window.addEventListener('dragover', over);
     window.addEventListener('drop', drop);
-    window.addEventListener('keydown', key);
     return () => {
       window.removeEventListener('dragenter', enter);
       window.removeEventListener('dragleave', leave);
       window.removeEventListener('dragover', over);
       window.removeEventListener('drop', drop);
-      window.removeEventListener('keydown', key);
     };
   }, []);
 
@@ -75,25 +74,24 @@ export function AddReport() {
 
   return (
     <>
-      <button type="button" onClick={() => { setError(null); setOpen(true); }} className={button}>
-        <UploadIcon className="h-3.5 w-3.5" /><span className="max-sm:hidden">Add report</span>
+      <button type="button" onClick={() => { setError(null); setOpen(true); }} aria-label="Add report" className={button}>
+        <Upload className="size-3.5" /><span className="max-sm:hidden">Add report</span>
       </button>
-      {(open || dragging) && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/20 p-4" onClick={() => setOpen(false)}>
-          <div className="w-full max-w-md rounded-2xl border border-line bg-surface shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className={`m-4 flex flex-col items-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-sm transition-colors ${
-              dragging ? 'border-accent bg-accent/5' : 'border-line'}`}>
-              <UploadIcon className="h-6 w-6 text-faint" />
-              <span className="font-medium text-ink">{busy ? 'Uploading…' : 'Drop a report'}</span>
-              <button type="button" disabled={busy} onClick={() => input.current?.click()} className={button}>Choose file</button>
-              <input ref={input} type="file" className="hidden" accept=".pdf,.csv,.tsv,.txt,.xlsx,.png,.jpg,.jpeg,.webp,.gif"
-                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload(f); }} />
-              {error && <span className="text-xs text-down">{error}</span>}
-            </div>
-            <div className="border-t border-line px-5 py-3 text-xs text-faint">Sent to Anthropic through your Claude login.</div>
+      <Dialog open={open || dragging} onOpenChange={o => { if (!o) { setOpen(false); setDragging(false); } }}>
+        <DialogContent className="max-w-md gap-0 rounded-2xl border-line bg-surface p-0">
+          <DialogTitle className="px-5 pt-5 text-[15px] font-semibold tracking-tight text-ink">Add report</DialogTitle>
+          <div className={`m-4 flex flex-col items-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-sm transition-colors ${
+            dragging ? 'border-accent bg-accent/5' : 'border-line'}`}>
+            <Upload className="size-6 text-faint" />
+            <span className="font-medium text-ink">{busy ? 'Uploading…' : 'Drop a report'}</span>
+            <button type="button" disabled={busy} onClick={() => input.current?.click()} className={button}>Choose file</button>
+            <input ref={input} type="file" className="hidden" accept=".pdf,.csv,.tsv,.txt,.xlsx,.png,.jpg,.jpeg,.webp,.gif"
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload(f); }} />
+            {error && <span className="text-xs text-down">{error}</span>}
           </div>
-        </div>
-      )}
+          <DialogDescription className="border-t border-line px-5 py-3 text-xs text-faint">Sent to Anthropic through your Claude login.</DialogDescription>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -103,7 +101,7 @@ export function ReportList({ reports, onOpen }: { reports: ReportItem[]; onOpen:
     <ul>
       {reports.map(r => (
         <li key={r.id}>
-          <button type="button" onClick={() => onOpen(r.id)} className="flex w-full items-center gap-3 px-5 py-2.5 text-left hover:bg-paper">
+          <button type="button" onClick={() => onOpen(r.id)} className="flex min-h-11 w-full items-center gap-3 px-5 py-2.5 text-left hover:bg-paper">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm text-ink"><bdi>{r.issuer ?? r.name ?? `Report ${r.id}`}</bdi></div>
               <div className="truncate text-xs text-faint">{r.asOf ? day(r.asOf) : '—'}{r.name && r.issuer ? <> · <bdi>{r.name}</bdi></> : ''}</div>
@@ -125,11 +123,6 @@ export function ReportPanel({ id, onClose }: { id: number; onClose: () => void }
   const [date, setDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
   useEffect(() => { setAnswers({}); setBalances({}); setDate(r?.asOf ?? ''); }, [r?.status, r?.asOf]);
 
   const review = r?.status === 'needs_review';
@@ -150,20 +143,20 @@ export function ReportPanel({ id, onClose }: { id: number; onClose: () => void }
   const field = 'rounded-lg border border-line bg-surface px-2 py-1 text-sm outline-none focus:border-accent';
 
   return (
-    <Panel onClose={onClose} wide>
-      <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-6">
-        <div className="min-w-0">
-          <div className="truncate text-xs text-muted"><bdi>{r?.name}</bdi></div>
-          <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-ink"><bdi>{r?.issuer ?? 'Report'}</bdi></h2>
-          <div className="mt-1 flex items-center gap-2 text-sm text-muted">
-            {r && <StatusChip status={r.status} />}
-            {r?.asOf && <span>{day(r.asOf)}</span>}
-            {r?.owner && <span>· <bdi>{r.owner}</bdi></span>}
-          </div>
+    <SidePanel onClose={onClose} wide kicker={<bdi>{r?.name}</bdi>} title={<bdi>{r?.issuer ?? 'Report'}</bdi>}
+      meta={<span className="flex items-center gap-2">
+        {r && <StatusChip status={r.status} />}
+        {r?.asOf && <span>{day(r.asOf)}</span>}
+        {r?.owner && <span>· <bdi>{r.owner}</bdi></span>}
+      </span>}
+      footer={<>
+        <button type="button" onClick={remove} className="min-h-9 font-medium text-muted hover:text-down">Delete</button>
+        <div className="flex items-center gap-3">
+          {error && <span className="text-down">{error}</span>}
+          {review && <button type="button" disabled={busy} onClick={() => send(r)} className={primaryButton}>{busy ? 'Checking…' : 'Send'}</button>}
         </div>
-        <button type="button" onClick={onClose} className="rounded-lg px-3 py-1 text-xs font-medium text-muted hover:bg-ink/5 hover:text-ink">Close</button>
-      </div>
-      <div className="flex-1 space-y-6 overflow-y-auto px-6 pb-6">
+      </>}>
+      <div className="space-y-6">
         {r?.error && <p className="text-sm text-down">{r.error}</p>}
         {review && r.questions.length > 0 && (
           <ol className="space-y-4">
@@ -198,9 +191,11 @@ export function ReportPanel({ id, onClose }: { id: number; onClose: () => void }
               </thead>
               <tbody className="divide-y divide-line border-t border-line">
                 {r.products.map(p => (
-                  <tr key={p.key} title={p.evidence}>
+                  <tr key={p.key}>
                     <td className="px-4 py-2.5">
-                      <div className="text-ink"><bdi>{p.name}</bdi>{p.accountNumber && <span className="text-faint"> ••{p.accountNumber.replace(/\D/g, '').slice(-4)}</span>}</div>
+                      <Tip content={p.evidence ? <bdi>{p.evidence}</bdi> : null}>
+                        <div className="text-ink" tabIndex={p.evidence ? 0 : undefined}><bdi>{p.name}</bdi>{p.accountNumber && <span className="text-faint"> {mask(p.accountNumber)}</span>}</div>
+                      </Tip>
                       <div className="text-xs text-faint"><bdi>{p.provider}</bdi>{p.liquidityDate && <> · Liquid from {day(p.liquidityDate)}</>}</div>
                     </td>
                     <td className="px-4 py-2.5 text-muted max-sm:hidden">{PRODUCT_TYPES[p.productType] ?? p.productType}</td>
@@ -227,14 +222,7 @@ export function ReportPanel({ id, onClose }: { id: number; onClose: () => void }
           </label>
         )}
       </div>
-      <div className="flex items-center justify-between gap-3 border-t border-line px-6 py-3 text-xs">
-        <button type="button" onClick={remove} className="font-medium text-muted hover:text-down">Delete</button>
-        <div className="flex items-center gap-3">
-          {error && <span className="text-down">{error}</span>}
-          {review && <button type="button" disabled={busy} onClick={() => send(r)} className={primaryButton}>{busy ? 'Checking…' : 'Send'}</button>}
-        </div>
-      </div>
-    </Panel>
+    </SidePanel>
   );
 }
 

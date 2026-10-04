@@ -3,6 +3,8 @@ export type Group = 'type' | 'source';
 
 export interface Account {
   id: string; source: string; sourceLabel: string; label: string; kind: 'bank' | 'card' | 'investment';
+  /** bank, cards_owed, or the holdings' asset class */
+  assetClass: string;
   valueIls: number | null; value: number | null; currency: string; asOf: string | null; lastSuccessAt: string | null;
   stale: boolean; fxMissing: boolean;
 }

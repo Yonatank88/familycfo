@@ -1,35 +1,71 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
-import { api, type Account, type ExpenseMonth, type Group, type Holding, type History, type Range, type ReportItem, type Slice, type Summary } from './api';
-import { OTHER, PALETTE, TYPE_COLORS, TYPE_LABELS } from './colors';
-import { asOf, day, money, monthLong, monthShort, pct, shortDay, signedMoney, signedPct, type Currency } from './format';
-import { ReportList } from './reports';
-import { Card, CardLink, ChangeChip, Dot, Panel, Pills, Tag } from './ui';
+import { getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table';
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import { Area, AreaChart, Bar, BarChart, Cell, XAxis } from 'recharts';
+import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
+import { api, type ExpenseMonth, type Group, type Holding, type History, type Range, type Slice, type Summary } from './api';
+import { FUND_CLASSES, OTHER, PALETTE, SUB_TYPE_LABELS, TYPE_COLORS, TYPE_LABELS } from './colors';
+import { day, money, monthLong, monthShort, pct, shortDay, signedMoney, signedPct, type Currency } from './format';
+import { AccountGroups } from './Layout';
+import { Card, CardLink, ChangeChip, Dot, Segmented, SidePanel, SubTag } from './ui';
+import { cn } from '@/lib/utils';
 
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
 
 const tone = (n: number | null | undefined) => (n == null || n === 0 ? 'text-muted' : n > 0 ? 'text-up' : 'text-down');
 const changePct = (now: number, start: number | null | undefined) => (start == null || !start ? null : ((now - start) / Math.abs(start)) * 100);
 
-function ChartTooltip({ active, payload, label, currency, labels }: {
-  active?: boolean; payload?: { dataKey: string; value: number; color: string }[]; label?: string; currency: Currency; labels: Record<string, string>;
+function HistoryTooltip({ active, payload, label, currency, labels }: {
+  active?: boolean; payload?: readonly { dataKey?: unknown; value?: unknown; color?: string }[]; label?: unknown; currency: Currency; labels: Record<string, string>;
 }) {
   if (!active || !payload?.length || !label) return null;
-  const rows = [...payload].filter(p => p.value).sort((a, b) => b.value - a.value);
+  const rows = payload.map(p => ({ key: String(p.dataKey), value: Number(p.value), color: p.color ?? OTHER }))
+    .filter(p => p.value).sort((a, b) => b.value - a.value);
   const total = rows.reduce((s, p) => s + p.value, 0);
   return (
     <div className="min-w-48 rounded-xl border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
-      <div className="mb-1.5 text-muted">{day(label)}</div>
+      <div className="mb-1.5 text-muted">{day(String(label))}</div>
       {rows.map(p => (
-        <div key={p.dataKey} className="flex items-center justify-between gap-6 py-0.5">
-          <span className="flex items-center gap-1.5 text-muted"><Dot color={p.color} className="h-1.5 w-1.5" />{labels[p.dataKey]}</span>
+        <div key={p.key} className="flex items-center justify-between gap-6 py-0.5">
+          <span className="flex items-center gap-1.5 text-muted"><Dot color={p.color} className="h-1.5 w-1.5" /><bdi>{labels[p.key]}</bdi></span>
           <span className="tabular-nums text-ink">{money(p.value, currency)}</span>
         </div>
       ))}
       <div className="mt-1.5 flex justify-between gap-6 border-t border-line pt-1.5 font-medium text-ink">
         <span>Total</span><span className="tabular-nums">{money(total, currency)}</span>
       </div>
+    </div>
+  );
+}
+
+/** The allocation under the chart: a 100% stacked bar and a bar list, in the chart's colours — its legend. */
+function Allocation({ slices, currency, convert, colorOf }: {
+  slices: Slice[]; currency: Currency; convert: (n: number) => number; colorOf: (key: string) => string;
+}) {
+  const top = slices.length > 6 ? [...slices.slice(0, 5), { key: 'other', label: 'Other', value: slices.slice(5).reduce((s, x) => s + x.value, 0) }] : slices;
+  const total = top.reduce((s, x) => s + x.value, 0);
+  if (!total) return null;
+  return (
+    <div className="mt-5">
+      <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" role="img" aria-label="Allocation">
+        {top.map(s => <span key={s.key} className="h-full first:rounded-l-full last:rounded-r-full" style={{ width: `${(s.value / total) * 100}%`, background: colorOf(s.key) }} />)}
+      </div>
+      <ol className="mt-3 space-y-1 text-sm">
+        {top.map(s => {
+          const share = (s.value / total) * 100;
+          return (
+            <li key={s.key} className="grid grid-cols-[minmax(0,1fr)_auto_2.5rem] items-center gap-x-3 py-0.5 sm:grid-cols-[minmax(0,1fr)_6rem_auto_2.5rem]">
+              <span className="flex min-w-0 items-center gap-2 text-ink"><Dot color={colorOf(s.key)} /><span className="truncate"><bdi>{s.label}</bdi></span></span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-line max-sm:hidden">
+                <span className="block h-full rounded-full" style={{ width: `${Math.max(2, share)}%`, background: colorOf(s.key) }} />
+              </span>
+              <span className="text-right tabular-nums text-ink">{money(convert(s.value), currency)}</span>
+              <span className="text-right text-xs tabular-nums text-faint">{Math.round(share)}%</span>
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }
@@ -42,7 +78,9 @@ function NetWorth({ s, h, range, setRange, group, setGroup, currency, convert, a
     date: p.date,
     ...Object.fromEntries(Object.entries(p.values).map(([k, v]) => [k, atRate(v, p.usdRate)])),
   })), [h, atRate]);
-  const labels = Object.fromEntries((h?.series ?? []).map(x => [x.key, x.label]));
+  const series = h?.series ?? [];
+  const labels = Object.fromEntries(series.map(x => [x.key, x.label]));
+  const config = Object.fromEntries(series.map(x => [x.key, { label: x.label }])) satisfies ChartConfig;
 
   // the change compares today with the first day of the range, each converted at its own day's rate in $
   const first = h?.points[0];
@@ -53,35 +91,40 @@ function NetWorth({ s, h, range, setRange, group, setGroup, currency, convert, a
   const assetsNow = convert(s.bank + s.investments);
   const assetsStart = st?.bank != null && st.investments != null ? startOf(st.bank + st.investments) : null;
   const debtsNow = convert(s.cardsOwed ?? 0);
-  const debtsStart = s.cardsOwed == null ? null : startOf(st?.cardsOwed);
+  const debtsStart = startOf(st?.cardsOwed);
+  const hasDebts = s.cardsOwed != null && s.cardsOwed !== 0;
 
   return (
-    <Card title="Net worth" action={<Pills size="xs" value={group} onChange={setGroup} options={[{ value: 'type', label: 'Type' }, { value: 'source', label: 'Source' }]} />}>
+    <Card title="Net worth" action={<Segmented label="Group by" size="xs" value={group} onChange={setGroup} options={[{ value: 'type', label: 'Type' }, { value: 'source', label: 'Source' }]} />}>
       <div className="text-center">
         <div className="text-[32px] font-semibold leading-tight tracking-tight tabular-nums text-ink">{money(netNow, currency)}</div>
-        <div className={`mt-0.5 text-[13px] tabular-nums ${netStart == null ? 'text-faint' : tone(netNow - netStart)}`}>
-          {netStart == null ? '—' : <>{signedMoney(netNow - netStart, currency)} · {signedPct(changePct(netNow, netStart))}</>}
-        </div>
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        {[
-          { label: 'Assets', color: 'var(--c1)', now: assetsNow, start: assetsStart, goodWhenUp: true },
-          { label: 'Debts', color: 'var(--c3)', now: debtsNow, start: debtsStart, goodWhenUp: false },
-        ].map(x => (
-          <div key={x.label} className="flex flex-col items-center gap-1">
-            <span className="flex items-center gap-1.5 text-xs text-muted"><Dot color={x.color} className="h-1.5 w-1.5" />{x.label}</span>
-            <span className="text-lg font-semibold tabular-nums text-ink">{money(x.now, currency)}</span>
-            <ChangeChip pct={changePct(x.now, x.start)} goodWhenUp={x.goodWhenUp} />
+        {netStart != null && (
+          <div className={`mt-0.5 text-[13px] tabular-nums ${tone(netNow - netStart)}`}>
+            {signedMoney(netNow - netStart, currency)} · {signedPct(changePct(netNow, netStart))}
           </div>
-        ))}
+        )}
       </div>
-      <div className="-mx-5 mt-4 h-52">
-        {chart.length ? (
-          <ResponsiveContainer>
+      {hasDebts && (
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {[
+            { label: 'Assets', color: 'var(--c1)', now: assetsNow, start: assetsStart, goodWhenUp: true },
+            { label: 'Debts', color: 'var(--c3)', now: debtsNow, start: debtsStart, goodWhenUp: false },
+          ].map(x => (
+            <div key={x.label} className="flex flex-col items-center gap-1">
+              <span className="flex items-center gap-1.5 text-xs text-muted"><Dot color={x.color} className="h-1.5 w-1.5" />{x.label}</span>
+              <span className="text-lg font-semibold tabular-nums text-ink">{money(x.now, currency)}</span>
+              <ChangeChip pct={changePct(x.now, x.start)} goodWhenUp={x.goodWhenUp} />
+            </div>
+          ))}
+        </div>
+      )}
+      {chart.length >= 2 && (
+        <>
+          <ChartContainer config={config} className="-mx-5 mt-4 aspect-auto h-52" initialDimension={{ width: 560, height: 208 }}>
             <AreaChart data={chart} margin={{ top: 6, right: 0, bottom: 0, left: 0 }}>
               <defs>
-                {(h?.series ?? []).map(x => (
-                  <linearGradient key={x.key} id={`fill-${x.key}`} x1="0" y1="0" x2="0" y2="1">
+                {series.map((x, i) => (
+                  <linearGradient key={x.key} id={`fill-${i}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={colorOf(x.key)} stopOpacity={0.32} />
                     <stop offset="100%" stopColor={colorOf(x.key)} stopOpacity={0.06} />
                   </linearGradient>
@@ -89,68 +132,57 @@ function NetWorth({ s, h, range, setRange, group, setGroup, currency, convert, a
               </defs>
               <XAxis dataKey="date" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={11}
                 tick={{ fill: 'var(--color-faint)' }} minTickGap={56} padding={{ left: 20, right: 20 }} />
-              <Tooltip content={<ChartTooltip currency={currency} labels={labels} />}
+              <ChartTooltip content={p => <HistoryTooltip {...p} currency={currency} labels={labels} />}
                 cursor={{ stroke: 'var(--color-faint)', strokeWidth: 1, strokeDasharray: '3 3' }} />
-              {(h?.series ?? []).map(x => (
-                <Area key={x.key} dataKey={x.key} stackId="1" type="monotone" stroke={colorOf(x.key)} strokeWidth={1.5}
-                  fill={`url(#fill-${x.key})`} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+              {series.map((x, i) => (
+                <Area key={x.key} dataKey={x.key} name={x.label} stackId="1" type="monotone" stroke={colorOf(x.key)} strokeWidth={1.5}
+                  fill={`url(#fill-${i})`} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
               ))}
             </AreaChart>
-          </ResponsiveContainer>
-        ) : <p className="pt-20 text-center text-sm text-faint">No data</p>}
-      </div>
-      <div className="flex justify-center pt-3">
-        <Pills value={range} onChange={setRange} options={RANGES.map(r => ({ value: r, label: r.toUpperCase() }))} />
-      </div>
+          </ChartContainer>
+          <div className="flex justify-center pt-3">
+            <Segmented label="Range" value={range} onChange={setRange} options={RANGES.map(r => ({ value: r, label: r.toUpperCase() }))} />
+          </div>
+        </>
+      )}
+      <Allocation slices={s.allocation[group]} currency={currency} convert={convert} colorOf={colorOf} />
     </Card>
   );
 }
 
 function ExpenseRowsPanel({ month, merchant, onClose }: { month: string; merchant?: { key: string; name: string }; onClose: () => void }) {
   const { data } = useQuery({ queryKey: ['expense-rows', month, merchant?.key], queryFn: () => api.expenseRows(month, merchant?.key) });
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
   const total = data?.reduce((s, r) => s + r.amount, 0);
   return (
-    <Panel onClose={onClose}>
-      <div className="flex items-start justify-between px-6 pb-4 pt-6">
-        <div>
-          <div className="text-xs text-muted">{monthLong(month)}</div>
-          <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-ink" dir="auto">{merchant?.name ?? 'Expenses'}</h2>
-          {total != null && <div className="mt-1 text-sm tabular-nums text-muted">{money(total)}</div>}
-        </div>
-        <button type="button" onClick={onClose} className="rounded-lg px-3 py-1 text-xs font-medium text-muted hover:bg-ink/5 hover:text-ink">Close</button>
-      </div>
-      <div className="flex-1 overflow-y-auto px-6 pb-6">
-        <div className="rounded-2xl border border-line bg-surface">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[11px] uppercase tracking-wide text-faint">
-                <th className="px-4 py-2 text-left font-medium">Date</th>
-                <th className="px-4 py-2 text-left font-medium">Description</th>
-                <th className="px-4 py-2 text-left font-medium max-sm:hidden">Account</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
+    <SidePanel onClose={onClose} kicker={monthLong(month)} title={merchant ? <bdi dir="auto">{merchant.name}</bdi> : 'Transactions'}
+      meta={total != null && <span className="tabular-nums">{money(total)}</span>}>
+      <div className="rounded-2xl border border-line bg-surface">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] uppercase tracking-wide text-faint">
+              <th className="px-4 py-2 text-left font-medium">Date</th>
+              <th className="px-4 py-2 text-left font-medium">Description</th>
+              <th className="px-4 py-2 text-left font-medium max-sm:hidden">Account</th>
+              <th className="px-4 py-2 text-right font-medium">Amount</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line border-t border-line">
+            {data?.map(r => (
+              <tr key={r.id}>
+                <td className="whitespace-nowrap px-4 py-2.5 text-muted">{shortDay(r.date)}</td>
+                <td className="px-4 py-2.5 text-ink"><bdi dir="auto">{r.description}</bdi></td>
+                <td className="whitespace-nowrap px-4 py-2.5 text-muted max-sm:hidden"><bdi>{r.account}</bdi></td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-ink">{money(r.amount)}</td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-line border-t border-line">
-              {data?.map(r => (
-                <tr key={r.id}>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-muted">{shortDay(r.date)}</td>
-                  <td className="px-4 py-2.5 text-ink" dir="auto">{r.description}</td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-muted max-sm:hidden">{r.account}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-ink">{money(r.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </Panel>
+    </SidePanel>
   );
 }
+
+const spendConfig = { total: { label: 'Spent' } } satisfies ChartConfig;
 
 function Spending({ months, current }: { months: ExpenseMonth[]; current: string }) {
   const [selected, setSelected] = useState(months.some(m => m.month === current) ? current : months.at(-1)!.month);
@@ -158,45 +190,44 @@ function Spending({ months, current }: { months: ExpenseMonth[]; current: string
   const idx = Math.max(0, months.findIndex(m => m.month === selected));
   const month = months[idx];
   const prev = months[idx - 1];
-  const top = month.merchants[0]?.total || 1;
+  const merchants = month.merchants.slice(0, 5);
+  const top = merchants[0]?.total || 1;
   return (
     <Card title="Spending" action={<CardLink onClick={() => setPanel({ month: month.month })}>Transactions</CardLink>}>
       <div className="text-center">
         <div className="text-[32px] font-semibold leading-tight tracking-tight tabular-nums text-ink">{money(month.total)} <span className="text-xl font-medium text-muted">spent</span></div>
         <div className="mt-0.5 text-[13px] tabular-nums text-accent">
           {month.month !== current && <span className="text-muted">{monthLong(month.month)} · </span>}
-          {prev ? `${money(prev.total)} ${month.month === current ? 'last month' : 'the month before'}` : '—'}
+          {prev ? `${money(prev.total)} ${month.month === current ? 'last month' : 'the month before'}` : null}
         </div>
       </div>
-      <div className="-mx-1 mt-4 h-40">
-        <ResponsiveContainer>
-          <BarChart data={months} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
-            onClick={(e: { activeLabel?: string | number } | null) => {
-              const m = e?.activeLabel != null ? String(e.activeLabel) : null;
-              if (m) { setSelected(m); setPanel({ month: m }); }
-            }}>
-            <XAxis dataKey="month" tickFormatter={monthShort} tickLine={false} axisLine={false} fontSize={11} tick={{ fill: 'var(--color-faint)' }} minTickGap={6} />
-            <Tooltip cursor={{ fill: 'rgba(22,33,62,0.04)' }}
-              content={({ active, payload, label }) => active && payload?.length ? (
-                <div className="rounded-xl border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg">
-                  <div className="text-muted">{monthLong(String(label))}</div>
-                  <div className="mt-0.5 tabular-nums text-ink">{money(Number(payload[0].value))}</div>
-                </div>
-              ) : null} />
-            <Bar dataKey="total" radius={[5, 5, 5, 5]} maxBarSize={22} className="cursor-pointer" isAnimationActive={false}>
-              {months.map(m => (
-                <Cell key={m.month} fill={m.month === selected ? 'var(--color-accent)' : m.month === current ? 'color-mix(in srgb, var(--color-accent) 45%, white)' : '#e4e8f1'} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      <ChartContainer config={spendConfig} className="-mx-1 mt-4 aspect-auto h-40" initialDimension={{ width: 560, height: 160 }}>
+        <BarChart data={months} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          onClick={(e: { activeLabel?: string | number } | null) => {
+            const m = e?.activeLabel != null ? String(e.activeLabel) : null;
+            if (m) setSelected(m);
+          }}>
+          <XAxis dataKey="month" tickFormatter={monthShort} tickLine={false} axisLine={false} fontSize={11} tick={{ fill: 'var(--color-faint)' }} minTickGap={6} />
+          <ChartTooltip cursor={{ fill: 'rgba(22,33,62,0.04)' }}
+            content={({ active, payload, label }) => active && payload?.length ? (
+              <div className="rounded-xl border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg">
+                <div className="text-muted">{monthLong(String(label))}</div>
+                <div className="mt-0.5 tabular-nums text-ink">{money(Number(payload[0].value))}</div>
+              </div>
+            ) : null} />
+          <Bar dataKey="total" radius={[5, 5, 5, 5]} maxBarSize={22} className="cursor-pointer" isAnimationActive={false}>
+            {months.map(m => (
+              <Cell key={m.month} fill={m.month === selected ? 'var(--color-accent)' : m.month === current ? 'color-mix(in srgb, var(--color-accent) 45%, white)' : '#e4e8f1'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ChartContainer>
       <ol className="mt-4 space-y-0.5 text-sm">
-        {month.merchants.map((m, i) => (
+        {merchants.map((m, i) => (
           <li key={m.key}>
             <button type="button" onClick={() => setPanel({ month: month.month, merchant: { key: m.key, name: m.name } })}
-              className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-paper">
-              <span className="min-w-0 flex-1 truncate text-ink" dir="auto">{m.name}</span>
+              className="-mx-2 flex min-h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-paper">
+              <span className="min-w-0 flex-1 truncate text-ink"><bdi dir="auto">{m.name}</bdi></span>
               <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-line sm:w-28">
                 <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (m.total / top) * 100)}%`, background: PALETTE[i % PALETTE.length] }} />
               </span>
@@ -210,122 +241,148 @@ function Spending({ months, current }: { months: ExpenseMonth[]; current: string
   );
 }
 
-function Allocation({ slices, currency, convert, colorOf }: {
-  slices: Slice[]; currency: Currency; convert: (n: number) => number; colorOf: (key: string) => string;
-}) {
-  const top = slices.length > 6 ? [...slices.slice(0, 5), { key: 'other', label: 'Other', value: slices.slice(5).reduce((s, x) => s + x.value, 0) }] : slices;
-  const total = top.reduce((s, x) => s + x.value, 0);
-  return (
-    <Card title="Allocation">
-      {!total ? <p className="text-sm text-faint">No data</p> : (
-        <div className="flex flex-col items-center gap-6 sm:flex-row">
-          <div className="h-36 w-36 shrink-0">
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie data={top} dataKey="value" nameKey="label" innerRadius="72%" outerRadius="100%" paddingAngle={2} cornerRadius={4}
-                  stroke="none" isAnimationActive={false}>
-                  {top.map(s => <Cell key={s.key} fill={colorOf(s.key)} />)}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <ol className="w-full min-w-0 flex-1 space-y-2.5 text-sm">
-            {top.map(s => (
-              <li key={s.key} className="flex items-center gap-3">
-                <span className="flex min-w-0 flex-1 items-center gap-2 text-ink"><Dot color={colorOf(s.key)} /><span className="truncate"><bdi>{s.label}</bdi></span></span>
-                <span className="tabular-nums text-ink">{money(convert(s.value), currency)}</span>
-                <span className="w-9 text-right text-xs tabular-nums text-faint">{Math.round((s.value / total) * 100)}%</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-    </Card>
-  );
-}
+// ---- holdings ----------------------------------------------------------------------------------------------
 
-const KIND_COLOR: Record<Account['kind'], string> = { bank: 'var(--c1)', card: 'var(--c3)', investment: 'var(--c2)' };
+/** The holdings' group: top-level type (fund-type products together as Funds). */
+const groupOf = (h: Holding) => (FUND_CLASSES.has(h.assetClass) ? 'funds' : h.assetClass);
+const groupLabel = (g: string) => (g === 'funds' ? 'Funds' : TYPE_LABELS[g] ?? g);
+const groupColor = (g: string) => (g === 'funds' ? 'var(--c4)' : TYPE_COLORS[g] ?? OTHER);
 
-function Accounts({ accounts, currency, convert }: { accounts: Account[]; currency: Currency; convert: (n: number) => number }) {
+/** A holding's second line: its source (unless the name already says it) and its name (when not the symbol). */
+const holdingSub = (h: Holding) => [
+  h.name.includes(h.sourceLabel) || h.symbol.includes(h.sourceLabel) ? null : h.sourceLabel,
+  h.name !== h.symbol ? h.name : null,
+].filter(Boolean).join(' · ');
+
+const valueIls = (h: Holding) => h.valueIls ?? -Infinity;
+
+function SortHead({ label, column, align = 'right' }: { label: string; column: { getIsSorted: () => false | 'asc' | 'desc'; toggleSorting: (desc?: boolean) => void }; align?: 'left' | 'right' }) {
+  const sorted = column.getIsSorted();
+  const Icon = sorted === 'asc' ? ArrowUp : ArrowDown;
   return (
-    <Card title="Accounts" flush>
-      <ul>
-        {accounts.map(a => (
-          <li key={a.id} className="flex items-center gap-3 px-5 py-2">
-            <Dot color={a.source.startsWith('report:') ? 'var(--c4)' : KIND_COLOR[a.kind]} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 text-sm text-ink">
-                <span className="truncate"><bdi>{a.label}</bdi></span>
-                {a.stale && <span title={`Last successful sync: ${asOf(a.lastSuccessAt)}`} className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />}
-              </div>
-              <div className="truncate text-xs text-faint">{a.label === a.sourceLabel ? '' : <><bdi>{a.sourceLabel}</bdi> · </>}{asOf(a.asOf)}</div>
-            </div>
-            <div className="text-right tabular-nums">
-              <div className={`text-sm ${a.fxMissing ? 'text-warn' : 'text-ink'}`}>{a.valueIls == null ? '—' : money(convert(a.valueIls), currency)}</div>
-              {a.currency !== 'ILS' && a.value != null && <div className="text-xs text-faint">{money(a.value, a.currency)}</div>}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </Card>
+    <button type="button" onClick={() => column.toggleSorting(sorted !== 'desc')}
+      className={cn('inline-flex min-h-9 items-center gap-1 uppercase tracking-wide hover:text-ink', align === 'right' && 'flex-row-reverse')}>
+      {label}<Icon className={cn('size-3', !sorted && 'invisible')} />
+    </button>
   );
 }
 
 function Holdings({ holdings, currency, convert }: { holdings: Holding[]; currency: Currency; convert: (n: number) => number }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? holdings : holdings.slice(0, 10);
-  const th = 'px-2 sm:px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-faint first:pl-5 last:pr-5';
-  const td = 'px-2 sm:px-3 py-2 first:pl-5 last:pr-5 [&:not(:first-child)]:whitespace-nowrap';
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'value', desc: true }]);
+  const money$ = (h: Holding) => (h.valueIls == null ? money(h.value, h.currency) : money(convert(h.valueIls), currency));
+  const columns = useMemo<ColumnDef<Holding>[]>(() => [
+    { id: 'name', accessorFn: h => h.symbol, header: ({ column }) => <SortHead label="Name" column={column} align="left" /> },
+    { id: 'value', accessorFn: valueIls, header: ({ column }) => <SortHead label="Value" column={column} /> },
+    { id: 'weight', accessorFn: h => h.pctOfInvestments ?? -Infinity, header: ({ column }) => <SortHead label="Weight" column={column} /> },
+    { id: 'change', accessorFn: h => h.changePct ?? -Infinity, header: ({ column }) => <SortHead label="Change" column={column} /> },
+    { id: 'gain', accessorFn: h => h.gainPct ?? -Infinity, header: ({ column }) => <SortHead label="Gain" column={column} /> },
+  ], []);
+  const table = useReactTable({ data: holdings, columns, state: { sorting }, onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel() });
+
+  // the sorted rows, bucketed by type; groups by subtotal
+  const groups = useMemo(() => {
+    const by = new Map<string, Holding[]>();
+    for (const r of table.getRowModel().rows) by.set(groupOf(r.original), [...(by.get(groupOf(r.original)) ?? []), r.original]);
+    return [...by].map(([key, rows]) => ({ key, rows, total: rows.reduce((s, h) => s + (h.valueIls ?? 0), 0),
+      weight: rows.reduce((s, h) => s + (h.pctOfInvestments ?? 0), 0) })).sort((a, b) => b.total - a.total);
+  }, [table.getRowModel().rows]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const th = 'px-2 sm:px-3 py-1 text-[11px] font-medium text-faint first:pl-5 last:pr-5';
+  const td = 'px-2 sm:px-3 py-2 first:pl-5 last:pr-5';
+  const headers = table.getHeaderGroups()[0].headers;
+  const hide: Record<string, string> = { weight: 'max-md:hidden', change: '', gain: 'max-lg:hidden' };
+
   return (
-    <Card title="Holdings" flush className="lg:col-span-2"
-      action={holdings.length > 10 && <CardLink onClick={() => setAll(!all)}>{all ? 'Top 10' : `All ${holdings.length}`}</CardLink>}>
-      <div className="overflow-x-auto">
+    <Card title="Holdings" flush className="lg:col-span-2">
+      {/* sm and up: the table */}
+      <div className="max-sm:hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line">
-              <th className={`${th} text-left`}>Name</th>
-              <th className={`${th} text-left max-md:hidden`}>Type</th>
-              <th className={`${th} text-right`}>Value</th>
-              <th className={`${th} text-right max-sm:hidden`}>Weight</th>
-              <th className={`${th} text-right max-sm:hidden`}>Change</th>
-              <th className={`${th} text-right`}>Gain</th>
+              {headers.map(h => (
+                <th key={h.id} className={cn(th, h.id === 'name' ? 'text-left' : 'text-right', hide[h.id])}>
+                  {h.isPlaceholder ? null : typeof h.column.columnDef.header === 'function' ? h.column.columnDef.header(h.getContext()) : null}
+                </th>
+              ))}
             </tr>
           </thead>
-          <tbody>
-            {shown.map(h => (
-              <tr key={h.id} className="hover:bg-paper">
-                <td className={td}>
-                  <div className="font-medium text-ink">{h.symbol}</div>
-                  <div className="max-w-36 truncate text-xs text-faint sm:max-w-72"><bdi>{h.sourceLabel}</bdi>{h.name !== h.symbol && <> · <bdi>{h.name}</bdi></>}</div>
-                  {h.liquidityDate && <div className="text-xs text-faint">Liquid from {day(h.liquidityDate)}</div>}
-                </td>
-                <td className={`${td} max-md:hidden`}><Tag color={TYPE_COLORS[h.assetClass] ?? OTHER}>{TYPE_LABELS[h.assetClass] ?? h.assetClass}</Tag></td>
-                <td className={`${td} text-right tabular-nums ${h.fxMissing ? 'text-warn' : 'text-ink'}`}>
-                  {h.valueIls == null ? money(h.value, h.currency) : money(convert(h.valueIls), currency)}
-                  <div className={`text-xs sm:hidden ${tone(h.changePct)}`}>{signedPct(h.changePct)}</div>
-                </td>
-                <td className={`${td} text-right tabular-nums text-muted max-sm:hidden`}>{pct(h.pctOfInvestments)}</td>
-                <td className={`${td} text-right tabular-nums max-sm:hidden ${tone(h.changePct)}`}>{signedPct(h.changePct)}</td>
-                <td className={`${td} text-right tabular-nums ${tone(h.gainPct)}`}>
-                  {h.gainIls == null ? <span className="text-faint">—</span> : (
-                    <>
-                      <div>{signedMoney(convert(h.gainIls), currency)}</div>
-                      <div className="text-xs">{signedPct(h.gainPct)}</div>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {groups.map(g => {
+            const funds = g.key === 'funds';
+            return (
+              <tbody key={g.key} className="border-b border-line last:border-0">
+                <tr className="bg-paper/60">
+                  <td className={cn(td, 'py-1.5')}><span className="flex items-center gap-2 text-xs font-semibold text-ink"><Dot color={groupColor(g.key)} />{groupLabel(g.key)}</span></td>
+                  <td className={cn(td, 'py-1.5 text-right text-xs font-semibold tabular-nums text-ink')}>{money(convert(g.total), currency)}</td>
+                  <td className={cn(td, 'py-1.5 text-right text-xs tabular-nums text-muted', hide.weight)}>{pct(g.weight)}</td>
+                  {funds
+                    ? <td colSpan={2} className={cn(td, 'py-1.5 text-right text-[11px] font-medium uppercase tracking-wide text-faint')}>Liquid from</td>
+                    : <><td className={td} /><td className={cn(td, hide.gain)} /></>}
+                </tr>
+                {g.rows.map(h => {
+                  const sub = holdingSub(h);
+                  return (
+                    <tr key={h.id} className="hover:bg-paper">
+                      <td className={td}>
+                        <div className="flex flex-wrap items-center gap-x-2 font-medium text-ink"><bdi>{h.symbol}</bdi>{SUB_TYPE_LABELS[h.assetClass] && <SubTag>{SUB_TYPE_LABELS[h.assetClass]}</SubTag>}</div>
+                        {sub && <div className="text-xs text-faint"><bdi>{sub}</bdi></div>}
+                      </td>
+                      <td className={cn(td, 'whitespace-nowrap text-right tabular-nums', h.fxMissing ? 'text-warn' : 'text-ink')}>{money$(h)}</td>
+                      <td className={cn(td, 'whitespace-nowrap text-right tabular-nums text-muted', hide.weight)}>{pct(h.pctOfInvestments)}</td>
+                      {funds ? (
+                        <td colSpan={2} className={cn(td, 'whitespace-nowrap text-right tabular-nums text-muted')}>{h.liquidityDate ? day(h.liquidityDate) : '—'}</td>
+                      ) : (
+                        <>
+                          <td className={cn(td, 'whitespace-nowrap text-right tabular-nums', tone(h.changePct))}>{h.changePct == null ? '' : signedPct(h.changePct)}</td>
+                          <td className={cn(td, 'whitespace-nowrap text-right tabular-nums', tone(h.gainPct), hide.gain)}>
+                            {h.gainIls != null && <><div>{signedMoney(convert(h.gainIls), currency)}</div><div className="text-xs">{signedPct(h.gainPct)}</div></>}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            );
+          })}
         </table>
+      </div>
+
+      {/* below sm: two-line list rows */}
+      <div className="sm:hidden">
+        {groups.map(g => (
+          <section key={g.key} className="border-t border-line first:border-0">
+            <div className="flex items-center justify-between bg-paper/60 px-5 py-1.5 text-xs font-semibold text-ink">
+              <span className="flex items-center gap-2"><Dot color={groupColor(g.key)} />{groupLabel(g.key)}</span>
+              <span className="tabular-nums">{money(convert(g.total), currency)}</span>
+            </div>
+            <ul>
+              {g.rows.map(h => (
+                <li key={h.id} className="flex min-h-12 items-center gap-3 px-5 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-ink"><bdi>{h.symbol}</bdi></div>
+                    <div className="truncate text-xs text-faint">
+                      {SUB_TYPE_LABELS[h.assetClass] ?? <bdi>{holdingSub(h)}</bdi>}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right tabular-nums">
+                    <div className={cn('text-sm', h.fxMissing ? 'text-warn' : 'text-ink')}>{money$(h)}</div>
+                    <div className={cn('text-xs', g.key === 'funds' ? 'text-faint' : tone(h.changePct))}>
+                      {g.key === 'funds' ? (h.liquidityDate ? `Liquid ${day(h.liquidityDate)}` : '') : h.changePct == null ? '' : signedPct(h.changePct)}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
       </div>
     </Card>
   );
 }
 
-export default function Dashboard({ summary: s, range, setRange, currency, convert, reports, onOpenReport }: {
+export default function Dashboard({ summary: s, range, setRange, currency, convert }: {
   summary?: Summary; range: Range; setRange: (r: Range) => void; currency: Currency; convert: (n: number) => number;
-  reports: ReportItem[]; onOpenReport: (id: number) => void;
 }) {
   const [group, setGroup] = useState<Group>('type');
   const history = useQuery({ queryKey: ['history', range, group], queryFn: () => api.history(range, group), placeholderData: p => p });
@@ -351,11 +408,9 @@ export default function Dashboard({ summary: s, range, setRange, currency, conve
         ? <Spending months={expenses.data.months} current={expenses.data.currentMonth} />
         : <Card title="Spending"><p className="text-sm text-faint">No data</p></Card>}
       <Holdings holdings={s.holdings} currency={currency} convert={convert} />
-      <div className="flex min-w-0 flex-col gap-5">
-        <Allocation slices={s.allocation[group]} currency={currency} convert={convert} colorOf={colorOf} />
-        {reports.length > 0 && <Card title="Reports" flush><ReportList reports={reports} onOpen={onOpenReport} /></Card>}
-      </div>
-      <Accounts accounts={s.accounts} currency={currency} convert={convert} />
+      <Card title="Accounts" className="lg:hidden">
+        <div className="-mx-3"><AccountGroups accounts={s.accounts} currency={currency} convert={convert} /></div>
+      </Card>
     </div>
   );
 }
