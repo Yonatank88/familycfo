@@ -103,31 +103,55 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
   const demote = db.prepare(`UPDATE transactions SET kind = 'expense', kind_source = 'auto' WHERE id = ?`);
   let kept = 0, demoted = 0;
 
+  // card day-batches: what each card charged per charge day
+  const batches = new Map<string, { day: number; sum: number }[]>();
+  for (const r of cardRows) {
+    const list = batches.get(r.account_id) ?? [];
+    const day = Date.parse(localDate(r.charge_date));
+    const batch = list.find(b => b.day === day);
+    if (batch) batch.sum -= r.charged_amount; else list.push({ day, sum: -r.charged_amount });
+    batches.set(r.account_id, list);
+  }
+  const near = (a: number, b: number) => Math.abs(a - b) <= 4 * DAY;
+  const close = (sum: number, amount: number) => sum > 0 && Math.abs(sum - amount) <= Math.max(5, amount * 0.03);
+
+  const info = bills.map(bill => {
+    const companies = Object.entries(BILL_COMPANY_PATTERNS)
+      .filter(([, p]) => p.test(cardBillBody(bill.description))).map(([c]) => c);
+    let candidates = cards.filter(c => !companies.length || companies.includes(c.company));
+    // "0289 - כרטיסי אשראי…": the bill names its card — tie it to that card when we have it
+    const last4 = bill.description.trim().match(/^(\d{4}) - /)?.[1];
+    const named = last4 ? candidates.filter(c => c.id.endsWith(`:${last4}`)) : [];
+    if (named.length) candidates = named;
+    return { bill, candidates, day: Date.parse(localDate(bill.date)), amount: -bill.charged_amount };
+  });
+
+  const matches = (candidates: typeof cards, day: number, amount: number) => candidates.some(card => {
+    const rows = cardRows.filter(r => r.account_id === card.id && near(Date.parse(localDate(r.charge_date)), day));
+    if (close(rows.reduce((s, r) => s - r.charged_amount, 0), amount)) return true;
+    // a small batch charged on its own day (e.g. several foreign purchases debited together)
+    return (batches.get(card.id) ?? []).some(b => near(b.day, day) && close(b.sum, amount));
+  });
+
+  const matched = new Set<number>();
+  for (const x of info) if (matches(x.candidates, x.day, x.amount)) matched.add(x.bill.id);
+  // one card charge paid by two bank debits a day or two apart (e.g. Otsar Hahayal splitting a Cal charge)
+  for (const x of info) {
+    if (matched.has(x.bill.id)) continue;
+    const partner = info.find(y => y.bill.id !== x.bill.id && !matched.has(y.bill.id) && near(y.day, x.day)
+      && y.candidates.some(c => x.candidates.includes(c)) && matches(x.candidates, x.day, x.amount + y.amount));
+    if (partner) { matched.add(x.bill.id); matched.add(partner.bill.id); }
+  }
+
   db.transaction(() => {
-    for (const bill of bills) {
-      const companies = Object.entries(BILL_COMPANY_PATTERNS)
-        .filter(([, p]) => p.test(cardBillBody(bill.description))).map(([c]) => c);
-      const candidates = cards.filter(c => !companies.length || companies.includes(c.company));
-      const billDay = Date.parse(localDate(bill.date));
-      const amount = -bill.charged_amount;
-
-      const close = (sum: number) => sum > 0 && Math.abs(sum - amount) <= Math.max(5, amount * 0.03);
-      const matched = candidates.some(card => {
-        const near = cardRows.filter(r => r.account_id === card.id && Math.abs(Date.parse(localDate(r.charge_date)) - billDay) <= 4 * DAY);
-        if (close(near.reduce((s, r) => s - r.charged_amount, 0))) return true;
-        // a small batch charged on its own day (e.g. several foreign purchases debited together)
-        const byDay = new Map<string, number>();
-        for (const r of near) byDay.set(localDate(r.charge_date), (byDay.get(localDate(r.charge_date)) ?? 0) - r.charged_amount);
-        return [...byDay.values()].some(close);
-      });
-
+    for (const { bill, candidates, day, amount } of info) {
       // an unmatched statement-sized bill is still the card's bill — but only inside the period the scraped card data
       // covers; before that, the bill is the only record of that spending, so it stays an expense
       const covered = candidates.some(card => {
         const range = coverage.get(card.id);
-        return !!range && billDay >= range.from - 5 * DAY && billDay <= range.to + 5 * DAY;
+        return !!range && day >= range.from - 5 * DAY && day <= range.to + 5 * DAY;
       });
-      if (matched || (amount >= STATEMENT_MIN && covered)) kept++;
+      if (matched.has(bill.id) || (amount >= STATEMENT_MIN && covered)) kept++;
       else { demote.run(bill.id); demoted++; }
     }
   })();
