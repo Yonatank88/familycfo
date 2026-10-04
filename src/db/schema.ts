@@ -9,6 +9,70 @@ export const BASELINE_VERSION = 100;
 /** Steps after the baseline, applied in order to a database that has the baseline and a prefix of these. */
 const STEPS: { version: number; name: string; sql: string }[] = [
   { version: 101, name: 'holdings.cost_basis', sql: `ALTER TABLE holdings ADD COLUMN cost_basis REAL` },
+  { version: 102, name: 'reports', sql: `
+    -- an imported report (pension, study fund, statement…): the file, what the AI read from it, and the review
+    CREATE TABLE reports (
+      id INTEGER PRIMARY KEY,
+      sha256 TEXT NOT NULL UNIQUE,
+      file TEXT NOT NULL,                  -- data/reports/<sha256>.<ext>
+      original_name TEXT,
+      issuer TEXT,
+      report_type TEXT,
+      as_of TEXT,
+      status TEXT NOT NULL CHECK (status IN ('extracting','needs_review','applied','superseded','failed')),
+      extraction TEXT,                     -- JSON, see src/reports/extract.ts
+      questions TEXT,                      -- JSON [{ id, text, options? }]
+      answers TEXT,                        -- JSON { [question id]: answer }
+      error TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      applied_at TEXT
+    );
+
+    -- every value point a report applied; a report holding is the latest point of its holding_source
+    CREATE TABLE report_values (
+      report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+      holding_source TEXT NOT NULL,        -- report:<provider-slug>:<account>
+      provider TEXT,
+      product_type TEXT NOT NULL,
+      account_number TEXT,                 -- digits only
+      name TEXT,
+      owner TEXT,
+      balance REAL NOT NULL,
+      currency TEXT NOT NULL,
+      as_of TEXT NOT NULL,
+      liquidity_date TEXT,
+      PRIMARY KEY (report_id, holding_source)
+    );
+    CREATE INDEX idx_report_values_source ON report_values(holding_source, as_of);
+
+    -- holdings.asset_class gains the long-term savings classes (a CHECK can only change with a table rebuild)
+    CREATE TABLE holdings_new (
+      id INTEGER PRIMARY KEY,
+      source TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      name TEXT,
+      quantity REAL NOT NULL,
+      currency TEXT,
+      asset_class TEXT NOT NULL CHECK (asset_class IN ('stock','crypto','stablecoin','broker_cash',
+        'pension','study_fund','provident_fund','deposit','other')),
+      broker TEXT,
+      manual_price REAL,
+      manual_price_date TEXT,
+      archived INTEGER NOT NULL DEFAULT 0,
+      synced_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      cost_basis REAL,
+      UNIQUE (source, symbol)
+    );
+    INSERT INTO holdings_new (id, source, symbol, name, quantity, currency, asset_class, broker, manual_price, manual_price_date,
+      archived, synced_at, created_at, updated_at, cost_basis)
+    SELECT id, source, symbol, name, quantity, currency, asset_class, broker, manual_price, manual_price_date,
+      archived, synced_at, created_at, updated_at, cost_basis FROM holdings;
+    DROP TABLE holdings;
+    ALTER TABLE holdings_new RENAME TO holdings;
+    CREATE INDEX idx_holdings_symbol ON holdings(symbol);
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 
@@ -89,7 +153,7 @@ const BASELINE = `
   CREATE INDEX idx_tx_description ON transactions(description);
   CREATE INDEX idx_tx_matched ON transactions(matched_txn_id);
 
-  -- positions synced from a broker, wallet or exchange (src/sync/)
+  -- positions synced from a broker, wallet or exchange (src/sync/), and products from imported reports (src/reports/)
   CREATE TABLE holdings (
     id INTEGER PRIMARY KEY,
     source TEXT NOT NULL,                -- <source id>:<account>, e.g. ibkr:U1234567, wallets:0xabc…, binance:spot

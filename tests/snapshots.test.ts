@@ -131,16 +131,27 @@ describe('database', () => {
     rmSync(path, { force: true });
   });
 
-  it('upgrades a baseline database with the later steps', () => {
+  it('upgrades a baseline database with the later steps, keeping every holding', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-base-${process.pid}.db`;
     openDb(path).close();
     const db = new Database(path);
-    expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101]);
-    db.prepare(`DELETE FROM schema_version WHERE version = 101`).run();
-    db.exec(`ALTER TABLE holdings DROP COLUMN cost_basis`);
+    expect(db.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102]);
+    // back to the baseline: holdings with the old asset classes and no cost_basis, no reports
+    db.exec(`DELETE FROM schema_version WHERE version > 100; DROP TABLE report_values; DROP TABLE reports; DROP TABLE holdings;
+      CREATE TABLE holdings (id INTEGER PRIMARY KEY, source TEXT NOT NULL, symbol TEXT NOT NULL, name TEXT, quantity REAL NOT NULL, currency TEXT,
+        asset_class TEXT NOT NULL CHECK (asset_class IN ('stock','crypto','stablecoin','broker_cash')), broker TEXT, manual_price REAL,
+        manual_price_date TEXT, archived INTEGER NOT NULL DEFAULT 0, synced_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE (source, symbol));
+      INSERT INTO holdings (id, source, symbol, quantity, currency, asset_class, archived) VALUES
+        (3, 'ibkr:U1', 'VOO', 10, 'USD', 'stock', 0), (7, 'binance:spot', 'BTC-USD', 0.1, 'USD', 'crypto', 1)`);
     db.close();
     const reopened = openDb(path);
-    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101]);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual([100, 101, 102]);
+    expect(reopened.prepare(`SELECT id, source, symbol, quantity, asset_class, archived, cost_basis FROM holdings ORDER BY id`).all()).toEqual([
+      { id: 3, source: 'ibkr:U1', symbol: 'VOO', quantity: 10, asset_class: 'stock', archived: 0, cost_basis: null },
+      { id: 7, source: 'binance:spot', symbol: 'BTC-USD', quantity: 0.1, asset_class: 'crypto', archived: 1, cost_basis: null },
+    ]);
+    reopened.prepare(`INSERT INTO holdings (source, symbol, quantity, asset_class) VALUES ('report:x:1', 'Pension', 1, 'pension')`).run();
     reopened.close();
     rmSync(path, { force: true });
   });
