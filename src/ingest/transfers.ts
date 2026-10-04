@@ -89,6 +89,14 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
     WHERE kind = 'card_payment' AND COALESCE(kind_source, 'auto') = 'auto'
   `).all() as { id: number; date: string; description: string; charged_amount: number }[];
 
+  // per card: first and last charge date its scraped rows cover
+  const coverage = new Map<string, { from: number; to: number }>();
+  for (const r of cardRows) {
+    const day = Date.parse(localDate(r.charge_date));
+    const range = coverage.get(r.account_id);
+    if (!range) coverage.set(r.account_id, { from: day, to: day });
+    else { range.from = Math.min(range.from, day); range.to = Math.max(range.to, day); }
+  }
   const demote = db.prepare(`UPDATE transactions SET kind = 'expense', kind_source = 'auto' WHERE id = ?`);
   let kept = 0, demoted = 0;
 
@@ -110,7 +118,13 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
         return [...byDay.values()].some(close);
       });
 
-      if (matched || (amount >= STATEMENT_MIN && candidates.length > 0)) kept++;
+      // an unmatched statement-sized bill is still the card's bill — but only inside the period the scraped card data
+      // covers; before that, the bill is the only record of that spending, so it stays an expense
+      const covered = candidates.some(card => {
+        const range = coverage.get(card.id);
+        return !!range && billDay >= range.from - 5 * DAY && billDay <= range.to + 5 * DAY;
+      });
+      if (matched || (amount >= STATEMENT_MIN && covered)) kept++;
       else { demote.run(bill.id); demoted++; }
     }
   })();

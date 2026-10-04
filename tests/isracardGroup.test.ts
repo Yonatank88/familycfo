@@ -61,14 +61,15 @@ const approval = (over: Partial<ApiApproval> = {}): ApiApproval => ({
 });
 
 describe('transaction mapping', () => {
-  it('a voucher is a completed charge on its billing date, negative, with category and installments', () => {
+  it('a voucher is a completed charge on its billing date, negative, with installments and no category', () => {
     const t = convertVoucher(voucher({ currentInstallmentNum: 2, numberOfInstallment: 6, originalCurrencyIso: 'USD', originalAmount: 30 }),
       local('02/09/2026'));
     expect(t).toMatchObject({
       type: 'installments', identifier: 'V1', date: local('10/08/2026'), processedDate: local('02/09/2026'),
       originalAmount: -30, originalCurrency: 'USD', chargedAmount: -120, chargedCurrency: 'ILS',
-      description: 'שופרסל', category: 'מזון', status: 'completed', installments: { number: 2, total: 6 },
+      description: 'שופרסל', status: 'completed', installments: { number: 2, total: 6 },
     });
+    expect(t.category).toBeUndefined(); // transactionDescription is the deal type, not a category
     expect(convertVoucher(voucher({ billingAmount: -50, originalAmount: -50 }), local('02/09/2026')).chargedAmount).toBe(50); // refund
   });
 
@@ -184,7 +185,7 @@ describe('ingest', () => {
     expect(db.prepare(`SELECT status, txn_type, installment_number, installment_total, source_category FROM transactions ORDER BY id`).all())
       .toEqual([
         { status: 'pending', txn_type: 'normal', installment_number: null, installment_total: null, source_category: 'מזון' },
-        { status: 'completed', txn_type: 'installments', installment_number: 1, installment_total: 3, source_category: 'מזון' },
+        { status: 'completed', txn_type: 'installments', installment_number: 1, installment_total: 3, source_category: null },
       ]);
   });
 });

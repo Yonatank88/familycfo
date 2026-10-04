@@ -363,7 +363,8 @@ export function convertVoucher(voucher: ApiVoucher, processedDate: string): Scra
     chargedCurrency: SHEKEL,
     description: (voucher.businessName ?? '').trim(),
     memo: (voucher.moreInfo ?? '').trim(),
-    category: voucher.transactionDescription?.trim() || undefined,
+    // settled vouchers carry no merchant category (transactionDescription is the deal type, e.g. "עסקאות רגילות")
+    category: undefined,
     installments,
     status: 'completed',
     rawTransaction: voucher,

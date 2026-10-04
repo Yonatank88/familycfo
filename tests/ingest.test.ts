@@ -12,6 +12,8 @@ describe('kinds', () => {
     expect(kindFor({ description: 'זיכוי', charged_amount: 30, account_kind: 'card', category_kind: null })).toBe('refund');
     expect(kindFor(bank('ויזה', -2000))).toBe('card_payment');
     expect(kindFor(bank('מסטרקרד', -900))).toBe('card_payment'); // Hapoalim's spelling
+    expect(kindFor(bank('חיוב מ-ישראכרט בע"מ', -900))).toBe('card_payment'); // One Zero
+    expect(kindFor(bank('13795992/8172/ישראכרט בע"מ', -900))).toBe('card_payment'); // One Zero
     expect(kindFor(bank('העברה לחיסכון', -500))).toBe('savings');
   });
 
@@ -49,6 +51,18 @@ describe('card bills', () => {
     expect(reconcileCardBills(db)).toEqual({ kept: 1, demoted: 1 });
     expect(kindOf(db, bill)).toBe('card_payment');
     expect(kindOf(db, stray)).toBe('expense');
+  });
+
+  it('a statement-sized bill from before the card data starts stays an expense', () => {
+    const db = testDb();
+    addAccount(db, 'onezero:1', 'bank');
+    addAccount(db, 'isracard:1234', 'card');
+    addTx(db, { account: 'isracard:1234', date: '2026-07-10', processedDate: '2026-08-02', description: 'A', amount: -900 });
+    const old = addTx(db, { account: 'onezero:1', date: '2026-03-02', description: 'חיוב מ-ישראכרט בע"מ', amount: -4000, kind: 'card_payment' });
+    const inRange = addTx(db, { account: 'onezero:1', date: '2026-08-02', description: 'חיוב מ-ישראכרט בע"מ', amount: -4000, kind: 'card_payment' });
+    reconcileCardBills(db);
+    expect(kindOf(db, old)).toBe('expense');
+    expect(kindOf(db, inRange)).toBe('card_payment');
   });
 
   it('pairs a debit card charge with its purchase, one to one', () => {
