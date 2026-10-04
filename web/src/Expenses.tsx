@@ -1,35 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, Cell, XAxis } from 'recharts';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api, type ExpenseCategory, type ExpenseFilter, type ExpenseSource, type Range } from './api';
 import { compact, money, monthLong, monthShort, shortDay, type Currency } from './format';
 import { OTHER, PALETTE, SOURCE_OTHER, sourceColor } from './colors';
-import { BarList, Card, Dot, Name, RangeToggle, SidePanel } from './ui';
+import { BarList, Card, Dot, Name, SidePanel } from './ui';
 import { cn } from '@/lib/utils';
 
 /** A card's source colour; spend paid from the bank accounts is neutral. */
 const colorOf = (s: ExpenseSource) => (s.kind === 'card' ? sourceColor(s.key) : SOURCE_OTHER);
 
 const spendConfig = { total: { label: 'Spent' } } satisfies ChartConfig;
-
-/** "All" and one pill per source (card account / Bank). */
-function SourcePills({ sources, value, onChange }: { sources: ExpenseSource[]; value: string | null; onChange: (key: string | null) => void }) {
-  const pill = (active: boolean) => cn('inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium',
-    active ? 'border-transparent bg-accent/10 text-accent' : 'border-line bg-surface text-muted hover:text-ink');
-  return (
-    <div role="group" aria-label="Source" className="flex flex-wrap gap-1.5">
-      <button type="button" aria-pressed={value == null} className={pill(value == null)} onClick={() => onChange(null)}>All</button>
-      {sources.map(s => (
-        <button key={s.key} type="button" aria-pressed={value === s.key} className={pill(value === s.key)} onClick={() => onChange(s.key)}>
-          <Dot color={colorOf(s)} className="h-1.5 w-1.5" /><Name text={s.label} />
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** One source: the month's spend, the month before's, and for a card its next charge and the installments left. */
 function SourceCard({ s, prev, active, onClick, fmt }: { s: ExpenseSource; prev: string; active: boolean; onClick: () => void; fmt: (n: number) => string }) {
@@ -144,26 +126,6 @@ function CategoryList({ items, format, delta, onSelect }: {
   );
 }
 
-/** Previous / next month with spend, and a dropdown of every such month. */
-function MonthPicker({ months, value, onChange }: { months: string[]; value: string; onChange: (m: string) => void }) {
-  const i = months.indexOf(value);
-  const older = i >= 0 ? months[i + 1] : undefined;
-  const newer = i > 0 ? months[i - 1] : undefined;
-  const arrow = 'inline-flex size-9 items-center justify-center rounded-lg border border-line bg-surface text-muted hover:bg-paper hover:text-ink disabled:pointer-events-none disabled:opacity-40';
-  return (
-    <div className="flex items-center gap-1.5">
-      <button type="button" aria-label="Previous month" className={arrow} disabled={!older} onClick={() => older && onChange(older)}><ChevronLeft className="size-4" /></button>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger aria-label="Month" className="w-40 sm:w-44"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {months.map(m => <SelectItem key={m} value={m}>{monthLong(m)}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <button type="button" aria-label="Next month" className={arrow} disabled={!newer} onClick={() => newer && onChange(newer)}><ChevronRight className="size-4" /></button>
-    </div>
-  );
-}
-
 const MONTH = /^\d{4}-\d{2}$/;
 const monthFromUrl = () => {
   const m = new URLSearchParams(window.location.search).get('month');
@@ -192,8 +154,9 @@ export default function Expenses({ range, setRange, currency, convert }: {
     window.history.replaceState(null, '', `${window.location.pathname}?month=${m}`);
   };
   const { data } = useQuery({
-    queryKey: ['expense-breakdown', range, month, source],
-    queryFn: () => api.expenseBreakdown(range, month, source ?? undefined), placeholderData: p => p,
+    queryKey: ['expense-breakdown', month, source],
+    // the bars always cover the last 12 months; the month is picked by clicking one
+    queryFn: () => api.expenseBreakdown('1Y', month, source ?? undefined), placeholderData: p => p,
   });
   if (!data) return null;
   const fmt = (n: number) => money(convert(n), currency);
@@ -206,24 +169,8 @@ export default function Expenses({ range, setRange, currency, convert }: {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <MonthPicker months={data.months} value={selected} onChange={setMonth} />
-          <RangeToggle value={range} onChange={setRange} />
-        </div>
-        <div className="text-[22px] font-semibold leading-tight tabular-nums text-ink">{fmt(data.monthTotal)}</div>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {data.sources.map(s => (
-          <SourceCard key={s.key} s={s} prev={prevOf(selected)} fmt={fmt} active={source === s.key} onClick={() => setSource(source === s.key ? null : s.key)} />
-        ))}
-      </div>
-
-      <Card title="Spending">
-        <SourcePills sources={data.sources} value={source} onChange={setSource} />
-        <div className="mt-4 text-[28px] font-semibold leading-tight tracking-tight tabular-nums text-ink">{fmt(data.total)}</div>
-        <ChartContainer config={spendConfig} className="-mx-1 mt-4 aspect-auto h-48" initialDimension={{ width: 720, height: 192 }}>
+      <Card title="Last 12 months" action={<span className="text-sm text-muted">{monthLong(selected)} · <span className="font-semibold tabular-nums text-ink">{fmt(data.monthTotal)}</span></span>}>
+        <ChartContainer config={spendConfig} className="-mx-1 mt-2 aspect-auto h-48" initialDimension={{ width: 720, height: 192 }}>
           <BarChart data={chart} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
             onClick={(e: { activeLabel?: string | number } | null) => {
               const m = e?.activeLabel != null ? String(e.activeLabel) : null;
@@ -243,6 +190,12 @@ export default function Expenses({ range, setRange, currency, convert }: {
           </BarChart>
         </ChartContainer>
       </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {data.sources.map(s => (
+          <SourceCard key={s.key} s={s} prev={prevOf(selected)} fmt={fmt} active={source === s.key} onClick={() => setSource(source === s.key ? null : s.key)} />
+        ))}
+      </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card title="Categories">
