@@ -149,7 +149,8 @@ export function reconcileCardBills(db: DB): { kept: number; demoted: number } {
       // covers; before that, the bill is the only record of that spending, so it stays an expense
       const covered = candidates.some(card => {
         const range = coverage.get(card.id);
-        return !!range && day >= range.from - 5 * DAY && day <= range.to + 5 * DAY;
+        // strictly after the first charge day: a bill on it pays for purchases from before the data starts
+        return !!range && day > range.from + 5 * DAY && day <= range.to + 5 * DAY;
       });
       if (matched.has(bill.id) || (amount >= STATEMENT_MIN && covered)) kept++;
       else { demote.run(bill.id); demoted++; }

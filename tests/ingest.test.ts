@@ -75,6 +75,7 @@ describe('card bills', () => {
     addAccount(db, 'onezero:1', 'bank');
     addAccount(db, 'isracard:1234', 'card');
     addTx(db, { account: 'isracard:1234', date: '2026-07-10', processedDate: '2026-08-02', description: 'A', amount: -900 });
+    addTx(db, { account: 'isracard:1234', date: '2026-06-10', processedDate: '2026-07-02', description: 'Z', amount: -50 });
     const old = addTx(db, { account: 'onezero:1', date: '2026-03-02', description: 'חיוב מ-ישראכרט בע"מ', amount: -4000, kind: 'card_payment' });
     const inRange = addTx(db, { account: 'onezero:1', date: '2026-08-02', description: 'חיוב מ-ישראכרט בע"מ', amount: -4000, kind: 'card_payment' });
     reconcileCardBills(db);
