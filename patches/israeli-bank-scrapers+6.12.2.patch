@@ -48,10 +48,142 @@ index 618bf63..726cb92 100644
  async function fetchGraphql(url, query, variables = {}, extraHeaders = {}) {
    const result = await fetchPost(url, {
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
-index 4ffa0b2..6adefd4 100644
+index 4ffa0b2..e745530 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
-@@ -186,7 +186,8 @@ class HapoalimScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+@@ -126,6 +126,123 @@ async function getAccountBalance(apiSiteUrl, page, accountNumber) {
+   const balanceAndCreditLimit = await (0, _fetch.fetchGetWithinPage)(page, balanceAndCreditLimitUrl);
+   return balanceAndCreditLimit?.currentBalance;
+ }
++
++// Foreign-currency (מט"ח) accounts: ServerServices/foreign-currency/transactions, as used by
++// Urigo/accounter-fullstack (packages/modern-poalim-scraper/src/scrapers/hapoalim.ts) and
++// zenmoney/ZenPlugins (src/plugins/hapoalim/api.js). Response: balancesAndLimitsDataList[] — one entry per
++// currency/account type, each with currencySwiftCode, currentBalance and transactions[].
++async function fetchJsonWithinPage(page, url) {
++  const [text, status] = await page.evaluate(async innerUrl => {
++    const response = await fetch(innerUrl, { credentials: 'include' });
++    return [response.status === 204 ? null : await response.text(), response.status];
++  }, url);
++  let json = null;
++  if (text) {
++    try {
++      json = JSON.parse(text);
++    } catch {
++      json = undefined;
++    }
++  }
++  return { status, json };
++}
++/** keys and array lengths only — never values */
++function describeShape(value, depth = 0) {
++  if (Array.isArray(value)) {
++    return `[${value.length}${value.length && depth < 2 ? ` x ${describeShape(value[0], depth + 1)}` : ''}]`;
++  }
++  if (value && typeof value === 'object') {
++    return depth < 2 ? `{${Object.keys(value).map(k => {
++      const v = value[k];
++      return v && typeof v === 'object' ? `${k}:${describeShape(v, depth + 1)}` : k;
++    }).join(',')}}` : '{...}';
++  }
++  return typeof value;
++}
++function parseFxDate(value) {
++  if (value == null || value === '') return null;
++  const str = String(value);
++  if (/^\d{8}$/.test(str)) return (0, _moment.default)(str, DATE_FORMAT);
++  if (/^\d{10,13}$/.test(str)) return (0, _moment.default)(Number(str.length === 10 ? Number(str) * 1000 : str));
++  if (/^\d{1,2}[./]\d{1,2}[./]\d{2,4}$/.test(str)) return (0, _moment.default)(str, ['DD/MM/YYYY', 'DD.MM.YYYY', 'DD/MM/YY', 'DD.MM.YY']);
++  const m = (0, _moment.default)(str);
++  return m.isValid() ? m : null;
++}
++function convertFxTransactions(txns, currency, options) {
++  return txns.map(txn => {
++    const date = parseFxDate(txn.executingDate) || parseFxDate(txn.formattedExecutingDate) || parseFxDate(txn.valueDate);
++    const processed = parseFxDate(txn.valueDate) || parseFxDate(txn.formattedValueDate) || date;
++    const amount = Math.abs(Number(txn.eventAmount) || 0) * (txn.eventActivityTypeCode === 1 ? 1 : -1);
++    const result = {
++      type: _transactions.TransactionTypes.Normal,
++      identifier: txn.referenceNumber || txn.referenceCatenatedNumber || undefined,
++      date: date ? date.toISOString() : '',
++      processedDate: processed ? processed.toISOString() : '',
++      originalAmount: amount,
++      originalCurrency: currency,
++      chargedAmount: amount,
++      chargedCurrency: currency,
++      description: txn.activityDescription || txn.eventDetails || '',
++      status: _transactions.TransactionStatuses.Completed,
++      memo: txn.eventDetails && txn.eventDetails !== txn.activityDescription ? txn.eventDetails : ''
++    };
++    if (options?.includeRawTransaction) {
++      result.rawTransaction = (0, _transactions2.getRawTransaction)(txn);
++    }
++    return result;
++  }).filter(txn => txn.date);
++}
++async function getForeignCurrencyAccounts(apiSiteUrl, page, accountNumber, startDate, endDate, options) {
++  try {
++    const listUrl = `${apiSiteUrl}/foreign-currency/transactions?accountId=${accountNumber}&lang=he`;
++    const list = await fetchJsonWithinPage(page, listUrl);
++    debug('fx list: status %d, shape %s', list.status, describeShape(list.json));
++    const listed = list.json?.balancesAndLimitsDataList;
++    if (list.status !== 200 || !Array.isArray(listed) || !listed.length) {
++      debug('fx: no foreign-currency accounts');
++      return [];
++    }
++    const codes = [...new Set(listed.map(e => e.currencyCode).filter(c => c != null))];
++    const types = [...new Set(listed.map(e => e.detailedAccountTypeCode).filter(c => c != null))];
++    let entries = listed;
++    const detailsUrl = `${apiSiteUrl}/foreign-currency/transactions?accountId=${accountNumber}&view=details` +
++      `&retrievalStartDate=${startDate}&retrievalEndDate=${endDate}` +
++      (codes.length ? `&currencyCodeList=${codes.join(',')}` : '') +
++      (types.length ? `&detailedAccountTypeCodeList=${types.join(',')}` : '') + '&lang=he';
++    try {
++      const details = await fetchJsonWithinPage(page, detailsUrl);
++      debug('fx details: status %d, shape %s', details.status, describeShape(details.json));
++      if (details.status === 200 && Array.isArray(details.json?.balancesAndLimitsDataList) && details.json.balancesAndLimitsDataList.length) {
++        entries = details.json.balancesAndLimitsDataList;
++      }
++    } catch (e) {
++      debug('fx details failed: %s', e?.message);
++    }
++    const byCurrency = new Map();
++    for (const entry of entries) {
++      const currency = entry.currencySwiftCode;
++      if (!currency || currency === 'ILS') continue;
++      const acc = byCurrency.get(currency) || { balance: 0, hasBalance: false, txns: [] };
++      const balance = Number(entry.currentBalance);
++      if (Number.isFinite(balance)) {
++        acc.balance += balance;
++        acc.hasBalance = true;
++      }
++      acc.txns.push(...convertFxTransactions(entry.transactions || [], currency, options));
++      byCurrency.set(currency, acc);
++    }
++    debug('fx: %d entries -> currencies %s', entries.length, [...byCurrency].map(([c, a]) => `${c}(${a.txns.length} txns${a.hasBalance ? '' : ', no balance'})`).join(', '));
++    return [...byCurrency].map(([currency, acc]) => ({
++      accountNumber: `${accountNumber}-${currency}`,
++      currency,
++      balance: acc.hasBalance ? acc.balance : undefined,
++      txns: acc.txns
++    }));
++  } catch (e) {
++    debug('fx failed, ILS scrape unaffected: %s', e?.message);
++    return [];
++  }
++}
+ async function fetchAccountData(page, baseUrl, options) {
+   const restContext = await getRestContext(page);
+   const apiSiteUrl = `${baseUrl}/${restContext}`;
+@@ -153,6 +270,7 @@ async function fetchAccountData(page, baseUrl, options) {
+       balance,
+       txns
+     });
++    accounts.push(...(await getForeignCurrencyAccounts(apiSiteUrl, page, accountNumber, startDateStr, endDateStr, options)));
+   }
+   const accountData = {
+     success: true,
+@@ -186,7 +304,8 @@ class HapoalimScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
        loginUrl: `${this.baseUrl}/cgi-bin/poalwwwc?reqName=getLogonPage`,
        fields: createLoginFields(credentials),
        submitButtonSelector: '.login-btn',
@@ -130,10 +262,25 @@ index 0000000..5b3be4e
 +`,
 +};
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
-index 1bf8d21..57b157a 100644
+index 1bf8d21..d514ced 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
-@@ -103,6 +103,21 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -15,6 +15,14 @@ var _oneZeroQueries = require("./one-zero-queries");
+ function _interopRequireDefault(e) { return e && e.__esModule ? e : { default: e }; }
+ const HEBREW_WORDS_REGEX = /[\u0590-\u05FF][\u0590-\u05FF"'\-_ /\\]*[\u0590-\u05FF]/g;
+ const debug = (0, _debug.getDebug)('one-zero');
++const isClosedAccount = account => /CLOS/i.test(account.status || '') || !!account.closingDate && new Date(account.closingDate) <= new Date();
++// a movement-less account has no runningBalance to read; `balance` gives its current balance (found by introspection)
++const GET_BALANCE = `query GetBalance($portfolioId: String!, $accountId: String!) {
++  balance(portfolioId: $portfolioId, accountId: $accountId) {
++    currency
++    currentAccountBalance
++  }
++}`;
+ const IDENTITY_SERVER_URL = 'https://identity.tfd-bank.com/v1/';
+ const GRAPHQL_API_URL = 'https://mobile.tfd-bank.com/mobile-graph/graphql';
+ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -103,6 +111,21 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
      };
    }
    async login(credentials) {
@@ -155,7 +302,7 @@ index 1bf8d21..57b157a 100644
      const otpTokenResult = await this.resolveOtpToken(credentials);
      if (!otpTokenResult.success) {
        return otpTokenResult;
-@@ -119,6 +134,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -119,6 +142,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
          idToken
        }
      } = getIdTokenResponse;
@@ -163,3 +310,86 @@ index 1bf8d21..57b157a 100644
      debug('Requesting session token');
      const getSessionTokenResponse = await (0, _fetch.fetchPost)(`${IDENTITY_SERVER_URL}/sessions/token`, {
        idToken,
+@@ -135,13 +159,38 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+       persistentOtpToken: otpTokenResult.longTermTwoFactorAuthToken
+     };
+   }
+-  async fetchPortfolioMovements(portfolio, startDate) {
+-    // TODO: Find out if we need the other accounts, there seems to always be one
+-    const account = portfolio.accounts[0];
++  /**
++   * One scraper account per open account of the portfolio (ILS current account + foreign-currency accounts).
++   * The base-currency account keeps accountNumber = portfolioNum (its history predates this split); the others are
++   * `${portfolioNum}-${currency}`.
++   */
++  async fetchPortfolioAccounts(portfolio, startDate) {
++    const accounts = portfolio.accounts || [];
++    const baseCurrency = portfolio.baseCurrency || 'ILS';
++    const base = accounts.find(a => a.currency === baseCurrency) || accounts[0];
++    const open = accounts.filter(a => a === base || !isClosedAccount(a));
++    debug(`Portfolio has ${accounts.length} accounts, ${open.length} open: ${open.map(a => `${a.currency}/${a.accountType}/${a.status}`).join(', ')}`);
++    const result = [];
++    for (const account of open) {
++      const accountNumber = account === base ? portfolio.portfolioNum : `${portfolio.portfolioNum}-${account.currency}`;
++      if (account === base) {
++        result.push(await this.fetchPortfolioMovements(portfolio, account, accountNumber, startDate));
++        continue;
++      }
++      // a foreign-currency account must never break the base account's scrape
++      try {
++        result.push(await this.fetchPortfolioMovements(portfolio, account, accountNumber, startDate));
++      } catch (e) {
++        debug(`Failed to fetch ${account.currency} account: ${e?.message}`);
++      }
++    }
++    return result;
++  }
++  async fetchPortfolioMovements(portfolio, account, accountNumber, startDate) {
+     let cursor = null;
+     const movements = [];
+     while (!movements.length || new Date(movements[0].movementTimestamp) >= startDate) {
+-      debug(`Fetching transactions for account ${portfolio.portfolioNum}...`);
++      debug(`Fetching transactions for account ${accountNumber}...`);
+       const {
+         movements: {
+           movements: newMovements,
+@@ -166,9 +215,28 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+     }
+     movements.sort((x, y) => new Date(x.movementTimestamp).valueOf() - new Date(y.movementTimestamp).valueOf());
+     const matchingMovements = movements.filter(movement => new Date(movement.movementTimestamp) >= startDate);
++    let balance = movements.length ? parseFloat(movements[movements.length - 1].runningBalance) : 0;
++    if (!movements.length) {
++      try {
++        const {
++          balance: current
++        } = await (0, _fetch.fetchGraphql)(GRAPHQL_API_URL, GET_BALANCE, {
++          portfolioId: portfolio.portfolioId,
++          accountId: account.accountId
++        }, {
++          authorization: `Bearer ${this.accessToken}`
++        });
++        if (Number.isFinite(current?.currentAccountBalance)) {
++          balance = current.currentAccountBalance;
++        }
++      } catch (e) {
++        debug(`No balance for account ${accountNumber}: ${e?.message}`);
++      }
++    }
+     return {
+-      accountNumber: portfolio.portfolioNum,
+-      balance: !movements.length ? 0 : parseFloat(movements[movements.length - 1].runningBalance),
++      accountNumber,
++      currency: account.currency || portfolio.baseCurrency || 'ILS',
++      balance,
+       txns: matchingMovements.map(movement => {
+         const hasInstallments = movement.transaction?.enrichment?.recurrences?.some(x => x.isRecurrent);
+         const modifier = movement.creditDebit === 'DEBIT' ? -1 : 1;
+@@ -235,7 +303,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+     const portfolios = result.customer.flatMap(customer => customer.portfolios || []);
+     return {
+       success: true,
+-      accounts: await Promise.all(portfolios.map(portfolio => this.fetchPortfolioMovements(portfolio, startMoment.toDate())))
++      accounts: (await Promise.all(portfolios.map(portfolio => this.fetchPortfolioAccounts(portfolio, startMoment.toDate())))).flat()
+     };
+   }
+ }
