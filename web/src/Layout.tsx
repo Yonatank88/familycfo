@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChartNoAxesColumn, Landmark, LayoutGrid, Menu, PiggyBank, Plug, Plus, RefreshCw, TrendingUp } from 'lucide-react';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { api, type ScrapeState, type Summary } from './api';
 import { asOf, type Currency } from './format';
 import { AddReport } from './reports';
 import { Segmented, button, primaryButton } from './ui';
 
-export type Page = '/' | '/bank' | '/expenses' | '/investments' | '/funds' | '/integrations';
+export type Page = '/' | '/bank' | '/bank/expenses' | '/investments' | '/funds' | '/integrations';
 export const PAGES: { path: Page; label: string; icon: typeof LayoutGrid }[] = [
   { path: '/', label: 'Dashboard', icon: LayoutGrid },
   { path: '/bank', label: 'Bank', icon: Landmark },
@@ -15,6 +16,12 @@ export const PAGES: { path: Page; label: string; icon: typeof LayoutGrid }[] = [
   { path: '/funds', label: 'Funds', icon: PiggyBank },
   { path: '/integrations', label: 'Integrations', icon: Plug },
 ];
+
+/** Every routable page; the Bank tabs are /bank (Cash flow) and /bank/expenses (Expenses). */
+export const ROUTES: Page[] = [...PAGES.map(p => p.path), '/bank/expenses'];
+/** The sidebar entry a page belongs to. */
+const navOf = (p: Page): Page => (p.startsWith('/bank') ? '/bank' : p);
+const BANK_TABS: { path: Page; label: string }[] = [{ path: '/bank', label: 'Cash flow' }, { path: '/bank/expenses', label: 'Expenses' }];
 
 /** The scrape job's state, shared by the top bar and the Integrations page (a "Test connection" is a scrape too). */
 export function useScrape() {
@@ -66,9 +73,9 @@ function Sidebar({ page, navigate, summary }: { page: Page; navigate: (p: Page) 
   const stale = accounts.some(a => a.stale);
   const link = (p: (typeof PAGES)[number]) => (
     <a key={p.path} href={p.path} onClick={e => { e.preventDefault(); navigate(p.path); }}
-      aria-current={page === p.path ? 'page' : undefined}
+      aria-current={navOf(page) === p.path ? 'page' : undefined}
       className={`flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium ${
-        page === p.path ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-paper hover:text-ink'}`}>
+        navOf(page) === p.path ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-paper hover:text-ink'}`}>
       <p.icon className="size-4" />{p.label}
     </a>
   );
@@ -100,7 +107,7 @@ export function Layout({ page, navigate, summary, currency, setCurrency, toRevie
   const scrape = useScrape();
   const [drawer, setDrawer] = useState(false);
   const go = (p: Page) => { setDrawer(false); navigate(p); };
-  const title = PAGES.find(p => p.path === page)?.label;
+  const title = PAGES.find(p => p.path === navOf(page))?.label;
   return (
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-64 shrink-0 border-r border-line bg-surface lg:block">
@@ -121,7 +128,14 @@ export function Layout({ page, navigate, summary, currency, setCurrency, toRevie
               className="-ml-2 flex size-9 items-center justify-center rounded-lg text-muted hover:bg-surface lg:hidden">
               <Menu className="size-5" />
             </button>
-            <h1 className="text-[15px] font-semibold tracking-tight text-ink">{title}</h1>
+            <h1 className={`text-[15px] font-semibold tracking-tight text-ink ${navOf(page) === '/bank' ? 'max-sm:sr-only' : ''}`}>{title}</h1>
+            {navOf(page) === '/bank' && (
+              <Tabs value={page} onValueChange={v => navigate(v as Page)} className="sm:ml-2">
+                <TabsList aria-label="Bank" className="bg-ink/[0.05]">
+                  {BANK_TABS.map(t => <TabsTrigger key={t.path} value={t.path} className="px-3 text-[13px]">{t.label}</TabsTrigger>)}
+                </TabsList>
+              </Tabs>
+            )}
             {toReview > 0 && (
               <button type="button" onClick={onReview}
                 className="min-h-9 rounded-lg bg-warn/15 px-2.5 text-xs font-medium text-warn hover:bg-warn/25">

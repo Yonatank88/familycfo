@@ -54,7 +54,21 @@ export interface Ranked { key: string; name: string; total: number; count: numbe
 /** categories: top-level, key = category id ('none' = uncategorised) */
 export interface ExpenseMonth { month: string; total: number; categories: Ranked[]; merchants: Ranked[] }
 export interface Expenses { currentMonth: string; months: ExpenseMonth[] }
-export interface ExpenseRow { id: number; date: string; description: string; account: string; amount: number }
+export interface ExpenseRow {
+  id: number; date: string; description: string; merchant: string; account: string; source: string; company: string;
+  category: string | null; amount: number; installment: [number, number] | null;
+}
+/** a card account (key = account id) or the bank accounts (key = 'bank') */
+export interface ExpenseSource {
+  key: string; kind: 'card' | 'bank'; company: string | null; label: string; thisMonth: number; lastMonth: number;
+  nextCharge: { date: string; amount: number } | null;
+  installments: { payments: number; plans: number; amount: number } | null;
+}
+export interface ExpenseBreakdown {
+  range: Range; from: string; currentMonth: string; source: string | null; sources: ExpenseSource[]; total: number;
+  months: { month: string; total: number }[]; categories: Ranked[]; merchants: Ranked[];
+}
+export interface ExpenseFilter { month?: string; range?: Range; source?: string; merchant?: string; category?: string }
 export interface Fund {
   source: string; name: string; provider: string | null; owner: string | null; subType: string | null; currency: string;
   value: number | null; valueIls: number | null; asOf: string | null; liquidityDate: string | null;
@@ -153,8 +167,10 @@ export const api = {
   summary: (range: Range) => request<Summary>(`/api/summary?range=${range}`),
   history: (range: Range, group: Group) => request<History>(`/api/history?range=${range}&group=${group}`),
   expenses: () => request<Expenses>('/api/expenses?months=12'),
-  expenseRows: (month: string, filter: { merchant?: string; category?: string } = {}) =>
-    request<ExpenseRow[]>(`/api/expenses/rows?month=${month}${filter.merchant ? `&merchant=${encodeURIComponent(filter.merchant)}` : ''}${filter.category ? `&category=${encodeURIComponent(filter.category)}` : ''}`),
+  expenseBreakdown: (range: Range, source?: string) =>
+    request<ExpenseBreakdown>(`/api/expenses/breakdown?range=${range}${source ? `&source=${encodeURIComponent(source)}` : ''}`),
+  expenseRows: (filter: ExpenseFilter) =>
+    request<ExpenseRow[]>(`/api/expenses/rows?${new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][])}`),
   funds: (range: Range) => request<Funds>(`/api/funds?range=${range}`),
   investments: (range: Range) => request<Investments>(`/api/investments?range=${range}`),
   cashFlow: (range: Range, account?: string) => request<CashFlow>(`/api/cashflow?range=${range}${account ? `&account=${encodeURIComponent(account)}` : ''}`),

@@ -50,7 +50,7 @@ export default function Dashboard({ summary: s, currency, convert, navigate }: {
     <div className="grid gap-5 md:grid-cols-3">
       <Tile title="Bank" to="/bank" value={fmt(s.bank)} navigate={navigate}>
         <div className="mx-5 border-t border-line" />
-        <Link to="/expenses" navigate={navigate} className="group grid grid-cols-2 gap-3 rounded-b-2xl px-5 pb-4 pt-3 hover:bg-paper/60">
+        <Link to="/bank/expenses" navigate={navigate} className="group grid grid-cols-2 gap-3 rounded-b-2xl px-5 pb-4 pt-3 hover:bg-paper/60">
           <div>
             <div className="text-xs text-muted">Expenses this month</div>
             <div className="mt-0.5 text-lg font-semibold tabular-nums text-ink group-hover:text-accent">{fmt(thisMonth)}</div>

@@ -268,7 +268,12 @@ export function summary(db: DB, asOf = today(), owners: Map<string, string> = ne
 
 // ---- expenses ----------------------------------------------------------------------------------------------
 
-interface ExpenseRow { id: number; date: string; month: string; description: string; merchant: string; account: string; amount: number; category: TopCategory }
+export interface ExpenseRow {
+  id: number; date: string; month: string; description: string; merchant: string; account: string; amount: number; category: TopCategory;
+  accountId: string; accountKind: 'bank' | 'card'; company: string;
+  /** [n, N] for an installment payment */
+  installment: [number, number] | null;
+}
 
 export interface TopCategory { key: string; name: string }
 export const UNCATEGORIZED: TopCategory = { key: 'none', name: 'Uncategorized' };
@@ -301,14 +306,16 @@ export function byCategory(rows: { amount: number; category: TopCategory }[], li
  * Spend rows: `kind = 'expense'` (positive amount) and refunds (negative), in ILS. Installments count on their charge
  * date (processed_date), everything else on the purchase date; calendar months; nothing after this month.
  */
-function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
+export function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
   const rows = db.prepare(`
     SELECT t.id, t.date, t.processed_date, t.description, t.charged_amount, COALESCE(t.charged_currency, 'ILS') AS currency,
-      t.kind, t.txn_type, t.installment_total, t.category_id, COALESCE(a.display_name, a.id) AS account
+      t.kind, t.txn_type, t.installment_number, t.installment_total, t.category_id, COALESCE(a.display_name, a.id) AS account,
+      a.id AS account_id, a.kind AS account_kind, a.company
     FROM transactions t JOIN accounts a ON a.id = t.account_id
     WHERE t.kind IN ('expense', 'refund')
   `).all() as { id: number; date: string; processed_date: string | null; description: string; charged_amount: number; currency: string;
-    kind: string; txn_type: string | null; installment_total: number | null; category_id: number | null; account: string }[];
+    kind: string; txn_type: string | null; installment_number: number | null; installment_total: number | null; category_id: number | null;
+    account: string; account_id: string; account_kind: 'bank' | 'card'; company: string }[];
   const topOf = topCategories(db);
   const month = asOf.slice(0, 7);
   const out: ExpenseRow[] = [];
@@ -319,7 +326,9 @@ function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
     const rate = rateToIls(db, r.currency, day);
     if (rate == null) continue;
     out.push({ id: r.id, date: day, month: day.slice(0, 7), description: r.description, merchant: merchantKey(r.description),
-      account: r.account, amount: round(-r.charged_amount * rate), category: topOf(r.category_id) });
+      account: r.account.replace(/\s*···\s*/, ' ••'), amount: round(-r.charged_amount * rate), category: topOf(r.category_id),
+      accountId: r.account_id, accountKind: r.account_kind, company: r.company,
+      installment: (r.installment_total ?? 0) > 1 && r.installment_number ? [r.installment_number, r.installment_total!] : null });
   }
   return out;
 }

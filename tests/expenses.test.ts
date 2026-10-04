@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { expenseRowsOf, expenses } from '../src/analytics/summary.js';
 import { cleanMerchantName } from '../src/util.js';
+import { expenseBreakdown, expenseRowsIn, nextCharge, remainingInstallments } from '../src/analytics/expenses.js';
 import { addAccount, addTx, testDb } from './helpers.js';
 
 describe('expenses', () => {
@@ -76,5 +77,52 @@ describe('merchant name cleaner', () => {
     expect(cleanMerchantName('7 Eleven')).toBe('7 Eleven');
     expect(cleanMerchantName('Cafe 12')).toBe('Cafe 12');
     expect(cleanMerchantName('123456')).toBe('123456');
+  });
+});
+
+describe('expenses by card', () => {
+  const db = testDb();
+  addAccount(db, 'oneZero:1', 'bank');
+  addAccount(db, 'isracard:1', 'card');
+  addAccount(db, 'max:2', 'card');
+  // a card purchase this month and last month
+  addTx(db, { account: 'isracard:1', date: '2026-05-03', processedDate: '2026-06-02', description: 'Cafe 12', amount: -40, kind: 'expense' });
+  addTx(db, { account: 'isracard:1', date: '2026-04-10', processedDate: '2026-05-02', description: 'Shop', amount: -100, kind: 'expense' });
+  // installments 1..3 of 300 each: 1 charged, 2 and 3 to come; plus a second plan fully charged
+  addTx(db, { account: 'max:2', date: '2026-04-01', processedDate: '2026-05-02', description: 'IKEA', amount: -300, kind: 'expense', txnType: 'installments', installmentNumber: 1, installmentTotal: 3 });
+  addTx(db, { account: 'max:2', date: '2026-04-01', processedDate: '2026-06-02', description: 'IKEA', amount: -300, kind: 'expense', txnType: 'installments', installmentNumber: 2, installmentTotal: 3 });
+  addTx(db, { account: 'max:2', date: '2026-01-01', processedDate: '2026-03-02', description: 'Phone', amount: -50, kind: 'expense', txnType: 'installments', installmentNumber: 2, installmentTotal: 2 });
+  addTx(db, { account: 'max:2', date: '2026-05-10', processedDate: '2026-06-09', description: 'Books', amount: -20, kind: 'expense' });
+  // bank: a debit, a standing order — and a card bill, which never counts
+  addTx(db, { account: 'oneZero:1', date: '2026-05-04', description: 'Electric company', amount: -250, kind: 'expense' });
+  addTx(db, { account: 'oneZero:1', date: '2026-05-02', description: 'ישראכרט', amount: -140, kind: 'card_payment' });
+
+  it('one source per card plus Bank; card bills never count', () => {
+    const b = expenseBreakdown(db, '1Y', undefined, '2026-05-15');
+    expect(b.sources.map(s => [s.key, s.thisMonth, s.lastMonth])).toEqual([
+      ['isracard:1', 40, 100], ['max:2', 320, 0], ['bank', 250, 0],
+    ]);
+    expect(b.months.find(m => m.month === '2026-05')?.total).toBe(610);
+    expect(expenseRowsIn(db, { source: 'bank' }, '2026-05-15').map(r => r.amount)).toEqual([250]);
+  });
+
+  it('next charge = the earliest processed date after today, everything charged on it', () => {
+    const b = expenseBreakdown(db, '1Y', undefined, '2026-05-15');
+    expect(b.sources.find(s => s.key === 'max:2')?.nextCharge).toEqual({ date: '2026-06-02', amount: 300 });
+    expect(nextCharge(db, 'isracard:1', '2026-05-15')).toEqual({ date: '2026-06-02', amount: 40 });
+    expect(nextCharge(db, 'isracard:1', '2026-06-02')).toBeNull();
+  });
+
+  it('remaining installments = payments after the last one charged, at the latest amount', () => {
+    expect(remainingInstallments(db, 'max:2', '2026-05-15')).toEqual({ payments: 2, plans: 1, amount: 600 });
+    expect(remainingInstallments(db, 'max:2', '2026-06-05')).toEqual({ payments: 1, plans: 1, amount: 300 });
+  });
+
+  it('filters by source; rows carry installment n/N and a cleaned merchant', () => {
+    const b = expenseBreakdown(db, '1Y', 'isracard:1', '2026-05-15');
+    expect(b.total).toBe(140);
+    expect(b.merchants.map(m => m.name)).toEqual(['Shop', 'Cafe 12']);
+    const rows = expenseRowsIn(db, { source: 'max:2', month: '2026-05' }, '2026-05-15');
+    expect(rows.map(r => [r.merchant, r.installment])).toEqual([['Books', null], ['IKEA', [1, 3]]]);
   });
 });

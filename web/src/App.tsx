@@ -8,10 +8,15 @@ import Funds from './Funds';
 import Investments from './Investments';
 import IntegrationEditor, { type EditorMode } from './IntegrationEditor';
 import Integrations from './Integrations';
-import { Layout, PAGES, type Page } from './Layout';
+import Expenses from './Expenses';
+import { Layout, ROUTES, type Page } from './Layout';
 import { ReportPanel, useReports } from './reports';
 
-const pageOf = (): Page => (PAGES.find(p => p.path === window.location.pathname)?.path ?? '/');
+const pageOf = (): Page => {
+  // the old Expenses address now lives under Bank
+  if (window.location.pathname === '/expenses') window.history.replaceState(null, '', '/bank/expenses');
+  return ROUTES.find(p => p === window.location.pathname) ?? '/';
+};
 
 export default function App() {
   const [page, setPage] = useState<Page>(pageOf);
@@ -44,6 +49,8 @@ export default function App() {
         ? <Integrations currency={currency} convert={convert} reports={reports} onOpenReport={setOpenReport} onEdit={key => setEditor({ kind: 'edit', key })} />
         : page === '/bank'
           ? <Bank range={range} setRange={setRange} currency={currency} convert={convert} />
+          : page === '/bank/expenses'
+            ? <Expenses range={range} setRange={setRange} currency={currency} convert={convert} />
           : page === '/investments'
             ? <Investments range={range} setRange={setRange} currency={currency} convert={convert} />
             : page === '/funds'

@@ -7,9 +7,10 @@ import { basename, join } from 'path';
 import { getDb } from '../db/connection.js';
 import { answerReport, deleteReport, failInterrupted, listReports, processReport, registerReport, reportDetail, setReportOwner } from '../reports/index.js';
 import { scrapeRunning, scrapeState, startScrape, submitOtp } from './scrapeJob.js';
-import { RANGES, expenseRowsOf, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
+import { RANGES, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
 import { priceChangeSince } from '../analytics/quotes.js';
 import { cashFlow, cashFlowRows } from '../analytics/cashflow.js';
+import { expenseBreakdown, expenseRowsIn } from '../analytics/expenses.js';
 import { funds } from '../analytics/funds.js';
 import { configuredSources, integrations } from '../analytics/integrations.js';
 import { configOwners } from '../analytics/owners.js';
@@ -93,10 +94,22 @@ app.get('/api/expenses', async req => {
   return expenses(db, months);
 });
 
+// one month's spend rows (month=YYYY-MM) or the range's (range=), optionally of one source (a card account id, or bank),
+// merchant or top-level category
 app.get('/api/expenses/rows', async req => {
   const q = req.query as Record<string, string>;
-  if (!/^\d{4}-\d{2}$/.test(q.month ?? '')) throw badRequest('month must be YYYY-MM');
-  return expenseRowsOf(db, q.month, { merchant: q.merchant || undefined, category: q.category || undefined });
+  if (q.month && !/^\d{4}-\d{2}$/.test(q.month)) throw badRequest('month must be YYYY-MM');
+  if (!q.month && !q.range) throw badRequest('month or range is required');
+  const filter = { merchant: q.merchant || undefined, category: q.category || undefined };
+  return expenseRowsIn(db, { ...filter, month: q.month || undefined, source: q.source || undefined,
+    from: q.month ? undefined : expenseBreakdown(db, rangeOf(q.range)).from });
+});
+
+// spend by source: each card account (this month, last month, next charge, installments left) and the bank accounts;
+// the range's months, categories and merchants, of one source when given
+app.get('/api/expenses/breakdown', async req => {
+  const q = req.query as Record<string, string>;
+  return expenseBreakdown(db, rangeOf(q.range), q.source || undefined);
 });
 
 // each fund (pension, study, provident, mutual) with its growth over the range and the returns its reports state
