@@ -1,7 +1,7 @@
 {
   "name": "familycfo",
   "version": "1.0.0",
-  "description": "FamilyCFO — a local-first CFO for Israeli families: scrapes your banks and credit cards, then shows cash flow, budgets, forecast, net worth, insurance, pension and a stock portfolio, with an optional AI chat over your own data.",
+  "description": "FamilyCFO — a local, read-only money dashboard for an Israeli household: bank balances, investments and expenses over time.",
   "license": "MIT",
   "private": true,
   "type": "module",

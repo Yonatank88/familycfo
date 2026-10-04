@@ -30,10 +30,9 @@ Add or update tests in `tests/` for logic changes (they use an in-memory SQLite,
 ## Conventions
 
 - Read [CLAUDE.md](CLAUDE.md) — the architecture and the accounting rules (what counts as spend, card bills,
-  transfers, installments, manual edits) that every change must keep.
-- Schema changes: a new numbered migration at the end of `src/db/migrations.ts`. Never edit a released migration.
-  Anything the user edited by hand (`*_source = 'manual'`) must survive re-scrapes and re-runs.
+  transfers, installments, snapshots) that every change must keep.
+- Schema changes: a numbered step after the baseline in `src/db/schema.ts`. Never edit the released baseline.
 - Analytics are pure functions in `src/analytics/`; the API in `src/server/` stays thin.
-- The UI is Hebrew and RTL. Reuse the components in `web/src/components/ui.tsx` and the tokens in `web/src/index.css`.
+- The UI is one English, LTR, light page (`web/src/Dashboard.tsx`).
 - Keep the app local-only: the API binds to 127.0.0.1, and nothing personal may be sent anywhere new without it
   being opt-in and documented in the README's privacy section.

@@ -10,10 +10,8 @@ running it.
   through a reverse proxy, a tunnel, port forwarding, or a `0.0.0.0` bind.
 - Bank logins are read from `accounts.json` (git-ignored). Treat that file like a password vault: keep the computer's
   disk encrypted and its user account locked. Where your bank supports it, use a read-only / viewing user for scraping.
-- `bank.db`, `backups/` and `data/` hold the data itself — keep them out of git, cloud-synced folders you share, and
+- `finance.db`, `backups/` and `data/` hold the data itself — keep them out of git, cloud-synced folders you share, and
   bug reports.
-- The data chat runs your own Claude Code CLI with only read access to the database and to `data/`. What it reads is
-  sent to Anthropic under your account to answer you.
 
 ## Reporting a vulnerability
 
