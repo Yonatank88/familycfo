@@ -1,5 +1,5 @@
 import type { DB } from '../db/connection.js';
-import { BANK_COMPANIES, NEEDS_CODE } from '../db/ingestRepo.js';
+import { BANK_COMPANIES, NEEDS_ATTENTION, NEEDS_CODE } from '../db/ingestRepo.js';
 import type { Config } from '../scraper.js';
 import { investmentSourceId } from '../sync/index.js';
 import { round } from '../util.js';
@@ -8,7 +8,7 @@ import { STALE_MS, sourceLabel, summary } from './summary.js';
 
 /** `/api/integrations`: each input source's health (from source_runs), what it brings, and the reports. */
 
-export type IntegrationStatus = 'ok' | 'failed' | 'needs_code' | 'stale' | 'not_configured' | 'disabled';
+export type IntegrationStatus = 'ok' | 'failed' | 'needs_code' | 'needs_attention' | 'stale' | 'not_configured' | 'disabled';
 
 /** A source from accounts.json — only whether its credentials are filled, never their values. */
 export interface ConfiguredSource { id: string; kind: 'bank' | 'card' | 'investment'; configured: boolean; disabled?: boolean; owner?: string }
@@ -38,13 +38,16 @@ export function configuredSources(config: Config | null): ConfiguredSource[] {
 /**
  * Disabled › Not configured (credentials missing and it never succeeded — a bank logged into by hand in the browser,
  * like Hapoalim with empty credentials, is configured once it has a successful run) › Needs code (the latest run, unattended,
- * stopped at the bank's SMS code — a Refresh from the dashboard can answer it) › Failed (the latest run failed) ›
+ * stopped at the bank's SMS code — a Refresh from the dashboard can answer it) › Needs attention (an unattended run skipped a
+ * card company whose last login was refused, until a run by hand succeeds) › Failed (the latest run failed) ›
  * Stale (no success in 36 h) › OK.
  */
 export function integrationStatus(x: { configured: boolean; disabled?: boolean; lastRunOk: boolean | null; lastSuccessAt: string | null; lastError?: string | null }, now = Date.now()): IntegrationStatus {
   if (x.disabled) return 'disabled';
   if (!x.configured && !x.lastSuccessAt) return 'not_configured';
-  if (x.lastRunOk === false) return x.lastError?.startsWith(NEEDS_CODE) ? 'needs_code' : 'failed';
+  if (x.lastRunOk === false) {
+    return x.lastError?.startsWith(NEEDS_CODE) ? 'needs_code' : x.lastError?.startsWith(NEEDS_ATTENTION) ? 'needs_attention' : 'failed';
+  }
   if (!x.lastSuccessAt || now - Date.parse(x.lastSuccessAt) > STALE_MS) return 'stale';
   return 'ok';
 }

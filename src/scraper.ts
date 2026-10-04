@@ -1,6 +1,6 @@
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers';
 import { getDb, type DB } from './db/connection.js';
-import { saveScrapedAccount, recordSourceRun, beginSourceRun, NEEDS_CODE } from './db/ingestRepo.js';
+import { saveScrapedAccount, recordSourceRun, beginSourceRun, NEEDS_CODE, NEEDS_ATTENTION } from './db/ingestRepo.js';
 import { archiveRaw } from './ingest/archive.js';
 import type { InvestmentSource } from './sync/index.js';
 import * as readline from 'readline';
@@ -9,6 +9,7 @@ import type { ScrapedAccount } from './ingest/normalize.js';
 import puppeteer from 'puppeteer';
 import { BROWSER_ARGS, describePage, findChromePath, maskAutomation, profileDir } from './scrapers/browser.js';
 import { scrapeIsracardGroup, type IsracardGroupCredentials } from './scrapers/isracardGroup.js';
+import { markSubmit, startHapoalimWatcher } from './scrapers/hapoalim.js';
 
 interface AccountConfig {
   companyId: keyof typeof CompanyTypes;
@@ -30,8 +31,8 @@ export interface ScrapeHooks {
   /** asked when the bank shows its OTP screen; defaults to the terminal. '' gives up */
   requestOtp?: (company: string) => Promise<string>;
   onProgress?: (event: ScrapeProgress) => void;
-  /** no one can answer an OTP (scheduled / no TTY): a source that asks for one stops at once as NEEDS_CODE. Default:
-   * no requestOtp hook and stdin isn't a terminal */
+  /** no one can answer an OTP (scheduled / no TTY): a source that asks for one stops at once as NEEDS_CODE, and a card
+   * company whose last login was refused is skipped as NEEDS_ATTENTION. Default: `isUnattended` */
   unattended?: boolean;
   /** replaces the per-company scrape (tests) */
   runCompany?: (account: AccountConfig, startDate: Date, otp: OtpControl) => Promise<CompanyResult>;
@@ -46,7 +47,27 @@ export interface OtpControl {
   onAbort: (abort: () => Promise<unknown>) => void;
 }
 
-export { NEEDS_CODE };
+export { NEEDS_CODE, NEEDS_ATTENTION };
+
+/** Unattended = no OTP hook, and stdin isn't a terminal (launchd, cron) or UNATTENDED=1 (the launchd plist sets it). */
+export function isUnattended(hasOtpHook: boolean, stdinIsTTY = !!process.stdin.isTTY, env: NodeJS.ProcessEnv = process.env): boolean {
+  return !hasOtpHook && (!stdinIsTTY || env.UNATTENDED === '1');
+}
+
+/** Login refusals after which another try may count toward Isracard's lockout. */
+const LOCKOUT_ERRORS = ['BLOCKED', 'INVALID_PASSWORD', 'ACCOUNT_BLOCKED'];
+
+/**
+ * The refusal that keeps a card company out of unattended runs: a BLOCKED / INVALID_PASSWORD / ACCOUNT_BLOCKED run since
+ * its last success. Only a successful run (interactive — unattended ones skip it) clears it.
+ */
+export function lockoutGuard(db: DB, source: string): string | null {
+  const row = db.prepare(`SELECT error FROM source_runs WHERE source = ? AND ok = 0
+      AND id > COALESCE((SELECT MAX(id) FROM source_runs WHERE source = ? AND ok = 1), 0)
+      AND (${LOCKOUT_ERRORS.map(() => `error LIKE ? || '%'`).join(' OR ')})
+    ORDER BY id DESC LIMIT 1`).get(source, source, ...LOCKOUT_ERRORS) as { error: string } | undefined;
+  return row?.error ?? null;
+}
 
 /**
  * The OTP channel of one source. Unattended, a request for a code marks the source as needing one, stops it (closing
@@ -83,63 +104,21 @@ async function promptOtp(): Promise<string> {
   });
 }
 
-async function startOtpWatcher(page: Page, requestOtp: () => Promise<string>): Promise<void> {
-  const maxWait = 90000;
-  const interval = 1000;
-  let waited = 0;
-  let otpHandled = false;
-
-  while (waited < maxWait && !otpHandled) {
-    try {
-      // Check if OTP modal is visible
-      const otpModal = await page.$('poalim-separated-characters-input');
-      if (otpModal) {
-        console.log('\n📱 OTP popup detected!');
-        const otp = await requestOtp();
-        if (!otp) return;
-
-        // Fill each digit into separate inputs
-        const inputs = await page.$$('poalim-separated-characters-input input');
-        for (let i = 0; i < Math.min(otp.length, inputs.length); i++) {
-          await inputs[i].type(otp[i], { delay: 50 });
-        }
-
-        // Click submit button
-        const submitBtn = await page.$('button.btn-red_1');
-        if (submitBtn) {
-          await submitBtn.click();
-          console.log('✅ OTP submitted');
-        }
-        
-        otpHandled = true;
-        return;
-      }
-
-      // Check if we've moved past login (success)
-      const url = page.url();
-      if (!url.includes('login') && !url.includes('auth')) {
-        return; // Login completed without OTP
-      }
-    } catch {
-      // Frame detached or other error - page might have navigated, just continue
-    }
-
-    await new Promise(r => setTimeout(r, interval));
-    waited += interval;
-  }
-}
-
 const ISRACARD_GROUP = new Set(['isracard', 'amex']);
+/** always in a visible browser, even with SHOW_BROWSER=0: Isracard blocks headless Chrome at performLogonI, after the
+ * password was already checked — so a headless try can count toward the lockout */
+const ALWAYS_HEADFUL = ISRACARD_GROUP;
+const showBrowserFor = (company: string) => ALWAYS_HEADFUL.has(company) || process.env.SHOW_BROWSER !== '0';
 /** run in their own Chrome profile under data/browser-profile/<company> */
 const PERSISTENT_PROFILE = new Set(['hapoalim']);
 /** upcoming card charges and future installments */
 const FUTURE_MONTHS = 2;
 
 /** One company through israeli-bank-scrapers. */
-async function libraryScrape(account: AccountConfig, startDate: Date, otp: OtpControl,
+async function libraryScrape(account: AccountConfig, startDate: Date, otp: OtpControl, unattended: boolean,
   onPageClose: (description: string) => void) {
   const requestOtp = otp.request;
-  const showBrowser = process.env.SHOW_BROWSER !== '0';
+  const showBrowser = showBrowserFor(account.companyId);
   // banks that ask for an SMS code on an unknown device get a persistent profile, so the bank may remember this one
   const browser = PERSISTENT_PROFILE.has(account.companyId)
     ? await puppeteer.launch({ headless: !showBrowser, executablePath: findChromePath(), args: BROWSER_ARGS, userDataDir: profileDir(account.companyId) })
@@ -147,6 +126,11 @@ async function libraryScrape(account: AccountConfig, startDate: Date, otp: OtpCo
   if (browser) otp.onAbort(() => browser.close());
   const scraper = createScraper({
     ...(browser ? { browser } : {}),
+    // desktop layout headless too (the library's default is 1024x768)
+    viewportSize: { width: 1920, height: 1080 },
+    // patched hapoalim.js: how long to wait for the redirect after the login (the SMS step); unattended the watcher
+    // stops it within ~20 s, this is the backstop
+    ...({ loginRedirectTimeout: unattended ? 45_000 : 180_000 } as object),
     companyId: CompanyTypes[account.companyId],
     startDate,
     futureMonthsToScrape: FUTURE_MONTHS,
@@ -171,9 +155,10 @@ async function libraryScrape(account: AccountConfig, startDate: Date, otp: OtpCo
 
       await maskAutomation(page);
 
-      // Start OTP watcher in background for Hapoalim
+      // Hapoalim's SMS step shares the login's URL: watch the page for it (src/scrapers/hapoalim.ts)
       if (account.companyId === 'hapoalim') {
-        startOtpWatcher(page, requestOtp).catch(() => {}); // Fire and forget
+        await markSubmit(page);
+        startHapoalimWatcher(page, requestOtp, unattended).catch(() => {}); // fire and forget
       }
     },
   });
@@ -209,10 +194,22 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
     console.log(`Scraping ${account.companyId}...`);
     hooks.onProgress?.({ type: 'start', company: account.companyId });
     const startedAt = new Date().toISOString();
+    const unattended = hooks.unattended ?? isUnattended(!!hooks.requestOtp);
+
+    // Isracard / Amex: after a refused login, only a person (dashboard Refresh, CLI in a terminal) tries again
+    const refusal = unattended && ISRACARD_GROUP.has(account.companyId) ? lockoutGuard(db, account.companyId) : null;
+    if (refusal) {
+      const errorMessage = `skipped unattended after "${refusal.slice(0, 120)}" — run it once from the dashboard Refresh`;
+      console.error(`Skipping ${account.companyId}: ${NEEDS_ATTENTION} ${errorMessage}`);
+      recordSourceRun(db, { source: account.companyId, startedAt, ok: false, error: `${NEEDS_ATTENTION}: ${errorMessage}` });
+      summaries.push({ company: account.companyId, kind: 'bank', success: false, newTransactionIds: [], errorType: NEEDS_ATTENTION });
+      hooks.onProgress?.({ type: 'done', company: account.companyId, success: false, newTransactions: 0, errorType: NEEDS_ATTENTION, errorMessage });
+      continue;
+    }
+
     beginSourceRun(db, account.companyId, startedAt);
     let pageStateAtClose: string | undefined;
 
-    const unattended = hooks.unattended ?? (!hooks.requestOtp && !process.stdin.isTTY);
     const otp = otpControl(hooks.requestOtp ? () => hooks.requestOtp!(account.companyId) : unattended ? null : promptOtp);
     try {
       const requestOtp = otp.request;
@@ -223,12 +220,13 @@ export async function scrapeAll(config: Config, db: DB = getDb(), hooks: ScrapeH
           credentials: account.credentials as unknown as IsracardGroupCredentials,
           startDate,
           futureMonths: FUTURE_MONTHS,
-          showBrowser: process.env.SHOW_BROWSER !== '0',
+          showBrowser: showBrowserFor(account.companyId),
           requestOtp,
-          finishByHand: !unattended && process.env.SHOW_BROWSER !== '0',
+          // the login is submitted once; unattended, nobody finishes it by hand
+          finishByHand: !unattended,
           onFailurePage: description => { pageStateAtClose = description; },
         }).then(r => (r.success ? { ...r, accounts: r.accounts as unknown as ScrapedAccount[] } : r))
-        : await libraryScrape(account, startDate, otp, description => { pageStateAtClose = description; });
+        : await libraryScrape(account, startDate, otp, unattended, description => { pageStateAtClose = description; });
       // unattended and the bank wanted a code: whatever the scrape then returned, that is why it stopped
       const result: CompanyResult = otp.needsCode() ? { success: false, errorType: NEEDS_CODE, errorMessage: 'the bank asked for an SMS code' } : raw;
 

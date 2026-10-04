@@ -11,6 +11,7 @@ const STATUS: Record<IntegrationStatus | 'review', { label: string; className: s
   ok: { label: 'OK', className: 'bg-up/10 text-up', dot: 'bg-up' },
   failed: { label: 'Failed', className: 'bg-down/10 text-down', dot: 'bg-down' },
   needs_code: { label: 'Needs code', className: 'bg-warn/15 text-warn', dot: 'bg-warn' },
+  needs_attention: { label: 'Needs attention', className: 'bg-warn/15 text-warn', dot: 'bg-warn' },
   stale: { label: 'Stale', className: 'bg-warn/15 text-warn', dot: 'bg-warn' },
   not_configured: { label: 'Not configured', className: 'bg-ink/[0.05] text-muted', dot: 'bg-faint' },
   disabled: { label: 'Disabled', className: 'bg-ink/[0.05] text-faint', dot: 'bg-line' },

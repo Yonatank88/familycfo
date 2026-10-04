@@ -122,6 +122,8 @@ export function saveTransactions(db: DB, txns: NormalizedTransaction[]): SaveRes
 /** One bank / investment source's outcome in a run. `asOf` = the source's own data time. */
 /** source_runs.error prefix of a run that stopped because the bank asked for an SMS code no one could answer */
 export const NEEDS_CODE = 'NEEDS_CODE';
+/** source_runs.error prefix of an unattended run that skipped a card company because its last login was refused */
+export const NEEDS_ATTENTION = 'NEEDS_ATTENTION';
 
 export function recordSourceRun(db: DB, run: { source: string; startedAt: string; ok: boolean; error?: string | null; asOf?: string | null }): void {
   inFlight.delete(`${run.source}|${run.startedAt}`);

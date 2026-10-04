@@ -18,6 +18,8 @@
     <string>__PATH__</string>
     <key>SHOW_BROWSER</key>
     <string>0</string>
+    <key>UNATTENDED</key>
+    <string>1</string>
   </dict>
   <key>StartCalendarInterval</key>
   <dict>

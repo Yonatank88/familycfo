@@ -48,7 +48,7 @@ index 618bf63..726cb92 100644
  async function fetchGraphql(url, query, variables = {}, extraHeaders = {}) {
    const result = await fetchPost(url, {
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js b/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
-index 4e821fa..fa19e6f 100644
+index 4e821fa..5650976 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
 @@ -7,6 +7,9 @@ exports.clickAccountSelectorGetAccountIds = clickAccountSelectorGetAccountIds;
@@ -61,7 +61,7 @@ index 4e821fa..fa19e6f 100644
  exports.selectAccountFromDropdown = selectAccountFromDropdown;
  exports.waitForPostLogin = waitForPostLogin;
  var _moment = _interopRequireDefault(require("moment"));
-@@ -396,6 +399,144 @@ async function fetchAccounts(page, startDate, options) {
+@@ -396,6 +399,163 @@ async function fetchAccounts(page, startDate, options) {
    }
    return accounts;
  }
@@ -135,11 +135,31 @@ index 4e821fa..fa19e6f 100644
 +  }
 +  return txns;
 +}
++const OLD_PAGE_TIMEOUT_MS = 45000;
++/**
++ * The frame (the page itself, the portal's iframe-old-pages, or any nested frame) that holds `selector`, polled until
++ * `timeout`: the old pages load into an iframe after the portal shell, sometimes well after it (headless especially),
++ * so neither a fixed frame lookup nor a 10 s wait on one frame is enough.
++ */
++async function findFrameWith(page, selector, timeout = OLD_PAGE_TIMEOUT_MS) {
++  const deadline = Date.now() + timeout;
++  for (;;) {
++    for (const frame of page.frames()) {
++      try {
++        if (await frame.$(selector)) return frame;
++      } catch {
++        // detached mid-navigation
++      }
++    }
++    if (Date.now() > deadline) {
++      throw new Error(`Waiting for selector \`${selector}\` failed (${page.frames().length} frames: ${page.frames().map(f => f.name() || '-').join(', ')})`);
++    }
++    await (0, _waiting.sleep)(500);
++  }
++}
 +async function openOldPage(scraper, path, readySelector) {
 +  await scraper.navigateTo(`${scraper.BASE_URL}${path}`);
-+  const frame = (await getTransactionsFrame(scraper.page)) || scraper.page;
-+  await (0, _elementsInteractions.waitUntilElementFound)(frame, readySelector, false, ELEMENT_RENDER_TIMEOUT_MS);
-+  return frame;
++  return findFrameWith(scraper.page, readySelector);
 +}
 +async function readTable(frame, tableSelector) {
 +  return frame.$eval(tableSelector, table => ({
@@ -158,8 +178,7 @@ index 4e821fa..fa19e6f 100644
 +    await page.select('#IN-SCH-MTB', choice.value);
 +    await page.$eval('#fromDate', (el, value) => { el.value = value; }, startMoment.format(DATE_FORMAT));
 +    await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => null), page.click('input[name="GO"]')]);
-+    const shown = (await getTransactionsFrame(scraper.page)) || scraper.page;
-+    await (0, _elementsInteractions.waitUntilElementFound)(shown, '#IN-SCH-MTB', false, ELEMENT_RENDER_TIMEOUT_MS);
++    const shown = await findFrameWith(scraper.page, '#IN-SCH-MTB');
 +    if (!(await (0, _elementsInteractions.elementPresentOnPage)(shown, 'table#dataTable040'))) {
 +      result.set(currency, []);
 +      continue;
@@ -206,7 +225,7 @@ index 4e821fa..fa19e6f 100644
  class BeinleumiGroupBaseScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
    BASE_URL = '';
    LOGIN_URL = '';
-@@ -423,6 +564,7 @@ class BeinleumiGroupBaseScraper extends _baseScraperWithBrowser.BaseScraperWithB
+@@ -423,6 +583,7 @@ class BeinleumiGroupBaseScraper extends _baseScraperWithBrowser.BaseScraperWithB
      const startMoment = _moment.default.max(startMomentLimit, (0, _moment.default)(startDate));
      await this.navigateTo(this.TRANSACTIONS_URL);
      const accounts = await fetchAccounts(this.page, startMoment, this.options);
@@ -215,7 +234,7 @@ index 4e821fa..fa19e6f 100644
        success: true,
        accounts
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
-index 4ffa0b2..e745530 100644
+index 4ffa0b2..98d8194 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
 @@ -126,6 +126,123 @@ async function getAccountBalance(apiSiteUrl, page, accountNumber) {
@@ -355,8 +374,8 @@ index 4ffa0b2..e745530 100644
        fields: createLoginFields(credentials),
        submitButtonSelector: '.login-btn',
 -      postAction: async () => (0, _navigation.waitForRedirect)(this.page),
-+      // the SMS (OTP) step takes longer than the default 20 s; give the user 3 minutes
-+      postAction: async () => (0, _navigation.waitForRedirect)(this.page, 180000),
++      // the SMS (OTP) step takes longer than the default 20 s; give the user 3 minutes (loginRedirectTimeout overrides)
++      postAction: async () => (0, _navigation.waitForRedirect)(this.page, this.options.loginRedirectTimeout ?? 180000),
        possibleResults: getPossibleLoginResults(this.baseUrl)
      };
    }
