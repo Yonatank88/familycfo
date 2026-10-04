@@ -234,7 +234,7 @@ index 4e821fa..5650976 100644
        success: true,
        accounts
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
-index 4ffa0b2..98d8194 100644
+index 4ffa0b2..c95fb02 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
 @@ -126,6 +126,123 @@ async function getAccountBalance(apiSiteUrl, page, accountNumber) {
@@ -361,7 +361,17 @@ index 4ffa0b2..98d8194 100644
  async function fetchAccountData(page, baseUrl, options) {
    const restContext = await getRestContext(page);
    const apiSiteUrl = `${baseUrl}/${restContext}`;
-@@ -153,6 +270,7 @@ async function fetchAccountData(page, baseUrl, options) {
+@@ -136,7 +253,8 @@ async function fetchAccountData(page, baseUrl, options) {
+   debug('got %d open accounts from %d total accounts, fetching txns and balance', openAccountsInfo.length, accountsInfo.length);
+   const defaultStartMoment = (0, _moment.default)().subtract(1, 'years').add(1, 'day');
+   const startDate = options.startDate || defaultStartMoment.toDate();
+-  const startMoment = _moment.default.max(defaultStartMoment, (0, _moment.default)(startDate));
++  // no one-year cap: an explicit startDate (SCRAPE_FROM) goes as far back as the bank serves
++    const startMoment = (0, _moment.default)(startDate);
+   const {
+     additionalTransactionInformation
+   } = options;
+@@ -153,6 +271,7 @@ async function fetchAccountData(page, baseUrl, options) {
        balance,
        txns
      });
@@ -369,7 +379,7 @@ index 4ffa0b2..98d8194 100644
    }
    const accountData = {
      success: true,
-@@ -186,7 +304,8 @@ class HapoalimScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+@@ -186,7 +305,8 @@ class HapoalimScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
        loginUrl: `${this.baseUrl}/cgi-bin/poalwwwc?reqName=getLogonPage`,
        fields: createLoginFields(credentials),
        submitButtonSelector: '.login-btn',
@@ -448,7 +458,7 @@ index 0000000..5b3be4e
 +`,
 +};
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
-index 1bf8d21..eb78a0e 100644
+index 1bf8d21..601c954 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/one-zero.js
 @@ -15,6 +15,52 @@ var _oneZeroQueries = require("./one-zero-queries");
@@ -652,7 +662,17 @@ index 1bf8d21..eb78a0e 100644
        txns: matchingMovements.map(movement => {
          const hasInstallments = movement.transaction?.enrichment?.recurrences?.some(x => x.isRecurrent);
          const modifier = movement.creditDebit === 'DEBIT' ? -1 : 1;
-@@ -235,7 +385,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+@@ -227,7 +377,8 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
+     }
+     const defaultStartMoment = (0, _moment.default)().subtract(1, 'years').add(1, 'day');
+     const startDate = this.options.startDate || defaultStartMoment.toDate();
+-    const startMoment = _moment.default.max(defaultStartMoment, (0, _moment.default)(startDate));
++    // no one-year cap: an explicit startDate (SCRAPE_FROM) goes as far back as the bank serves
++    const startMoment = (0, _moment.default)(startDate);
+     debug('Fetching account list');
+     const result = await (0, _fetch.fetchGraphql)(GRAPHQL_API_URL, _oneZeroQueries.GET_CUSTOMER, {}, {
+       authorization: `Bearer ${this.accessToken}`
+@@ -235,7 +386,7 @@ class OneZeroScraper extends _baseScraper.BaseScraper {
      const portfolios = result.customer.flatMap(customer => customer.portfolios || []);
      return {
        success: true,

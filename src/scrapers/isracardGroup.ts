@@ -339,7 +339,8 @@ const num = (v: unknown): number | undefined => {
 };
 
 export function convertApproval(txn: ApiApproval, processedDate?: string): ScrapedTxn {
-  const date = parseIsraeliDate(txn.purchaseDate, txn.israelTransactionTime);
+  // old records can come without a purchase date — fall back to the charge date
+  const date = txn.purchaseDate ? parseIsraeliDate(txn.purchaseDate, txn.israelTransactionTime) : (processedDate ?? new Date().toISOString());
   return {
     type: 'normal',
     identifier: txn.seqConfirmationNumber || undefined,
@@ -363,7 +364,7 @@ export function convertVoucher(voucher: ApiVoucher, processedDate: string): Scra
   return {
     type: installments ? 'installments' : 'normal',
     identifier: voucher.seqVoucherNumber || undefined,
-    date: parseIsraeliDate(voucher.purchaseDate, voucher.purchaseTime),
+    date: voucher.purchaseDate ? parseIsraeliDate(voucher.purchaseDate, voucher.purchaseTime) : processedDate,
     processedDate,
     originalAmount: -voucher.originalAmount,
     originalCurrency: currency(voucher.originalCurrencyIso),
