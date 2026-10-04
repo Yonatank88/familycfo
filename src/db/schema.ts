@@ -108,6 +108,10 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     ALTER TABLE holdings ADD COLUMN opened_at TEXT;
     ALTER TABLE holdings ADD COLUMN cost_basis_source TEXT;
   ` },
+  { version: 105, name: 'report_values.returns', sql: `
+    -- the returns a report prints for a product, JSON { ytd, m12, m36 } in % (each null when not printed)
+    ALTER TABLE report_values ADD COLUMN returns TEXT;
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 

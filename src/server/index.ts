@@ -10,6 +10,7 @@ import { scrapeRunning, scrapeState, startScrape, submitOtp } from './scrapeJob.
 import { RANGES, expenseRowsOf, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
 import { priceChangeSince } from '../analytics/quotes.js';
 import { cashFlow, cashFlowRows } from '../analytics/cashflow.js';
+import { funds } from '../analytics/funds.js';
 import { configuredSources, integrations } from '../analytics/integrations.js';
 import { configOwners } from '../analytics/owners.js';
 // which sources are configured and whether their credentials are filled — the values never leave configuredSources
@@ -97,6 +98,9 @@ app.get('/api/expenses/rows', async req => {
   if (!/^\d{4}-\d{2}$/.test(q.month ?? '')) throw badRequest('month must be YYYY-MM');
   return expenseRowsOf(db, q.month, q.merchant || undefined);
 });
+
+// each fund (pension, study, provident, mutual) with its growth over the range and the returns its reports state
+app.get('/api/funds', async req => funds(db, rangeOf((req.query as Record<string, string>).range)));
 
 // the bank accounts' money in / out per month (one account, or all), and their balances
 const accountOf = (v: unknown) => {

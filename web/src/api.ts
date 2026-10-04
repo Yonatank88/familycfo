@@ -53,6 +53,15 @@ export interface History {
 export interface ExpenseMonth { month: string; total: number; merchants: { key: string; name: string; total: number; count: number }[] }
 export interface Expenses { currentMonth: string; months: ExpenseMonth[] }
 export interface ExpenseRow { id: number; date: string; description: string; account: string; amount: number }
+export interface Fund {
+  source: string; name: string; provider: string | null; owner: string | null; subType: string | null; currency: string;
+  value: number | null; valueIls: number | null; asOf: string | null; liquidityDate: string | null;
+  /** value change between the report points bracketing the range; growthPct alone (stated set) = the report's own return */
+  growthIls: number | null; growthPct: number | null; growthFrom: string | null; growthTo: string | null; stated: 'YTD' | '12M' | '36M' | null;
+  returns: { ytd: number | null; m12: number | null; m36: number | null; asOf: string } | null;
+  points: { date: string; valueIls: number | null }[];
+}
+export interface Funds { range: Range; from: string; funds: Fund[] }
 export interface FlowTotals { in: number; out: number; net: number; moved: number }
 export interface CashFlow {
   range: Range; from: string; accounts: { id: string; label: string }[]; totals: FlowTotals;
@@ -142,6 +151,7 @@ export const api = {
   expenses: () => request<Expenses>('/api/expenses?months=12'),
   expenseRows: (month: string, merchant?: string) =>
     request<ExpenseRow[]>(`/api/expenses/rows?month=${month}${merchant ? `&merchant=${encodeURIComponent(merchant)}` : ''}`),
+  funds: (range: Range) => request<Funds>(`/api/funds?range=${range}`),
   investments: (range: Range) => request<Investments>(`/api/investments?range=${range}`),
   cashFlow: (range: Range, account?: string) => request<CashFlow>(`/api/cashflow?range=${range}${account ? `&account=${encodeURIComponent(account)}` : ''}`),
   cashFlowRows: (month: string, account?: string) =>

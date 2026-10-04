@@ -18,6 +18,7 @@
     "link": "tsx src/link.ts",
     "pipeline": "tsx src/pipeline.ts",
     "import": "tsx src/reports/cli.ts",
+    "reports:reextract": "tsx src/reports/reextract.ts",
     "schedule:install": "scripts/schedule.sh install",
     "schedule:uninstall": "scripts/schedule.sh uninstall",
     "test": "vitest run",

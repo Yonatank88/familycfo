@@ -52,6 +52,10 @@ statement (which may list securities and mutual funds — קרנות נאמנו�
   - `confidence` — 0..1, how sure you are of the balance and the identity. Below 0.8 when the number is unclear,
     split across lines, or you inferred it.
   - `evidence` — the exact text (one line or table row, as printed) the balance came from, with its page when known.
+  - `returns` — the returns the report prints for this product (תשואה), in percent as a plain number (5.2 for 5.2%,
+    negative when negative): `ytd` (מתחילת השנה), `m12` (12 החודשים האחרונים / שנה אחרונה), `m36` (36 חודשים / 3
+    שנים, cumulative as printed — not annualised). Net returns (נטו) over gross when both are printed; the product's
+    own return, not its track's benchmark. null for each one not printed; `returns` null when none is.
 - `questions` — only what you can't decide from the report itself, phrased for the household (in English; quote Hebrew
   names as printed). Give `options` when the answer is one of a few. Leave empty when everything is clear.
 

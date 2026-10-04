@@ -13,6 +13,9 @@ import readExcelFile from 'read-excel-file/node';
 export const PRODUCT_TYPES = ['pension', 'study_fund', 'provident_fund', 'mutual_fund', 'brokerage', 'deposit', 'other'] as const;
 export type ProductType = typeof PRODUCT_TYPES[number];
 
+/** Returns a report prints for a product, in % (5.2 = 5.2%): year to date, last 12 and 36 months. */
+export interface StatedReturns { ytd: number | null; m12: number | null; m36: number | null }
+
 export interface ExtractedProduct {
   provider: string;
   productType: ProductType;
@@ -23,6 +26,8 @@ export interface ExtractedProduct {
   liquidityDate: string | null;
   confidence: number;
   evidence: string;
+  /** optional: only when the report prints them */
+  returns?: StatedReturns | null;
 }
 
 export interface Question { id: string; text: string; options?: string[] }
@@ -66,6 +71,13 @@ export const EXTRACTION_SCHEMA = {
           liquidityDate: { ...nullable('string'), description: 'YYYY-MM-DD' },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
           evidence: { type: 'string' },
+          returns: {
+            type: ['object', 'null'],
+            additionalProperties: false,
+            required: ['ytd', 'm12', 'm36'],
+            description: 'returns printed for this product, in percent (5.2 = 5.2%); null when none is printed',
+            properties: { ytd: nullable('number'), m12: nullable('number'), m36: nullable('number') },
+          },
         },
       },
     },
@@ -166,6 +178,14 @@ export const claudeExtractor: Extractor = async (file, revision) => {
   }
 };
 
+const pctOrNull = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1000 ? v : null);
+/** The printed returns, or null when none is. */
+export function statedReturns(v: unknown): StatedReturns | null {
+  const r = (v ?? {}) as Record<string, unknown>;
+  const out = { ytd: pctOrNull(r.ytd), m12: pctOrNull(r.m12), m36: pctOrNull(r.m36) };
+  return out.ytd == null && out.m12 == null && out.m36 == null ? null : out;
+}
+
 const isoDate = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
@@ -191,6 +211,7 @@ export function normalizeExtraction(raw: unknown): Extraction {
       liquidityDate: isoDate(p.liquidityDate),
       confidence: Number.isFinite(p.confidence) ? Math.max(0, Math.min(1, Number(p.confidence))) : 0,
       evidence: str(p.evidence) ?? '',
+      returns: statedReturns(p.returns),
     })),
     questions: (Array.isArray(r.questions) ? r.questions : [])
       .filter((q: any) => q && str(q.text))

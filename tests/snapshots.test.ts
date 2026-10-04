@@ -135,7 +135,7 @@ describe('bank history backfill', () => {
 });
 
 /** The baseline and every step after it. */
-const VERSIONS = [100, 101, 102, 103, 104];
+const VERSIONS = [100, 101, 102, 103, 104, 105];
 
 describe('database', () => {
   it('refuses a database with another schema', () => {
@@ -177,7 +177,7 @@ describe('database', () => {
     openDb(path).close();
     const db = new Database(path);
     // back to 102: the step-102 holdings table (no mutual_fund), with rows
-    db.exec(`DELETE FROM schema_version WHERE version > 102; DROP TABLE holdings;
+    db.exec(`DELETE FROM schema_version WHERE version > 102; DROP TABLE holdings; ALTER TABLE report_values DROP COLUMN returns;
       CREATE TABLE holdings (id INTEGER PRIMARY KEY, source TEXT NOT NULL, symbol TEXT NOT NULL, name TEXT, quantity REAL NOT NULL, currency TEXT,
         asset_class TEXT NOT NULL CHECK (asset_class IN ('stock','crypto','stablecoin','broker_cash','pension','study_fund','provident_fund','deposit','other')),
         broker TEXT, manual_price REAL, manual_price_date TEXT, archived INTEGER NOT NULL DEFAULT 0, synced_at TEXT,
@@ -204,12 +204,31 @@ describe('step 104', () => {
     openDb(path).close();
     const db = new Database(path);
     db.exec(`DELETE FROM schema_version WHERE version > 103; ALTER TABLE holdings DROP COLUMN opened_at; ALTER TABLE holdings DROP COLUMN cost_basis_source;
+      ALTER TABLE report_values DROP COLUMN returns;
       INSERT INTO holdings (id, source, symbol, quantity, currency, asset_class, cost_basis) VALUES (4, 'ibkr:U1', 'VOO', 10, 'USD', 'stock', 4000)`);
     const before = db.prepare(`SELECT * FROM holdings ORDER BY id`).all();
     db.close();
     const reopened = openDb(path);
     expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual(VERSIONS);
     expect(reopened.prepare(`SELECT * FROM holdings ORDER BY id`).all()).toEqual(before.map(r => ({ ...(r as object), opened_at: null, cost_basis_source: null })));
+    reopened.close();
+    rmSync(path, { force: true });
+  });
+});
+
+describe('step 105', () => {
+  it('adds report_values.returns to a 104 database, keeping every value point', () => {
+    const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-104-${process.pid}.db`;
+    openDb(path).close();
+    const db = new Database(path);
+    db.exec(`DELETE FROM schema_version WHERE version > 104; ALTER TABLE report_values DROP COLUMN returns;
+      INSERT INTO reports (id, sha256, file, status) VALUES (1, 'x', 'f', 'applied');
+      INSERT INTO report_values (report_id, holding_source, product_type, balance, currency, as_of) VALUES (1, 'report:x:1', 'pension', 5, 'ILS', '2026-06-30')`);
+    const before = db.prepare(`SELECT * FROM report_values`).all();
+    db.close();
+    const reopened = openDb(path);
+    expect(reopened.prepare(`SELECT version FROM schema_version ORDER BY version`).pluck().all()).toEqual(VERSIONS);
+    expect(reopened.prepare(`SELECT * FROM report_values`).all()).toEqual(before.map(r => ({ ...(r as object), returns: null })));
     reopened.close();
     rmSync(path, { force: true });
   });

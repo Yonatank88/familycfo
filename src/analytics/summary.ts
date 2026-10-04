@@ -34,7 +34,7 @@ export const sourceLabel = (source: string) => SOURCE_NAMES[source] ?? source;
  * A report product's name (holding source report:…): the product's name as printed in the report; "••1234" (its
  * account's last 4) is added only when another product has the same name.
  */
-function reportLabels(db: DB): Map<string, string> {
+export function reportLabels(db: DB): Map<string, string> {
   const rows = (db.prepare(`SELECT source, name, symbol FROM holdings WHERE source LIKE 'report:%'`).all() as
     { source: string; name: string | null; symbol: string }[]).map(h => ({ source: h.source, name: (h.name || h.symbol).trim() }));
   const count = new Map<string, number>();

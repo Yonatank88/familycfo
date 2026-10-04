@@ -144,11 +144,37 @@ export async function answerReport(db: DB, id: number, answers: Record<string, s
   return settle(db, id, x, all);
 }
 
+/**
+ * Read a stored, applied report again (e.g. after the prompt learned something new, like stated returns) and apply the
+ * new reading through the same corroboration: its identity stays — the issuer, date and owner it was applied with, and
+ * every product must be one it already has (a dropped product keeps its point); its values update. When the checks ask
+ * something (or a product would be new), nothing changes and the questions come back.
+ */
+export async function reextractReport(db: DB, id: number, extract: Extractor = claudeExtractor): Promise<{ report: ReportRow; questions: Question[] }> {
+  const report = getReport(db, id);
+  if (!report) throw Object.assign(new Error(`no report ${id}`), { statusCode: 404 });
+  if (report.status !== 'applied') throw new Error(`report ${id} is ${report.status}; only an applied report can be re-extracted`);
+  const before = json<Extraction | null>(report.extraction, null);
+  const own = new Set(db.prepare(`SELECT holding_source FROM report_values WHERE report_id = ?`).pluck().all(id) as string[]);
+  const fresh = await extract(report.file);
+  const x: Extraction = { ...fresh, issuer: before?.issuer ?? fresh.issuer, reportType: before?.reportType ?? fresh.reportType,
+    asOf: before?.asOf ?? report.as_of ?? fresh.asOf, owner: before ? before.owner : fresh.owner, questions: [] };
+  const answers = json<Record<string, string>>(report.answers, {});
+  const c = corroborate(db, id, x, answers);
+  const questions = [...c.questions];
+  x.products.forEach((p, i) => {
+    if (!own.has(c.products[i].holdingSource)) questions.push({ id: `new:${productKey(p)}`, text: `'${p.name}' isn't a product of this report` });
+  });
+  if (questions.length) return { report, questions };
+  applyReport(db, id, x, c, answers);
+  return { report: getReport(db, id)!, questions: [] };
+}
+
 /** Write the report's value points (replacing the edition it supersedes) and recompute the holdings they touch. */
 export function applyReport(db: DB, id: number, x: Extraction, c: Corroboration, answers: Record<string, string> = {}): void {
   const touched = new Set<string>();
   const insert = db.prepare(`INSERT OR REPLACE INTO report_values (report_id, holding_source, provider, product_type, account_number, name, owner,
-    balance, currency, as_of, liquidity_date) VALUES (@reportId, @source, @provider, @type, @account, @name, @owner, @balance, @currency, @asOf, @liquidity)`);
+    balance, currency, as_of, liquidity_date, returns) VALUES (@reportId, @source, @provider, @type, @account, @name, @owner, @balance, @currency, @asOf, @liquidity, @returns)`);
   db.transaction(() => {
     // an edition: the products kept from the one it replaces ("Keep it") carry over, then it is superseded
     const previous = c.editionOf == null ? [] : db.prepare(`SELECT * FROM report_values WHERE report_id = ?`).all(c.editionOf) as Record<string, any>[];
@@ -164,7 +190,7 @@ export function applyReport(db: DB, id: number, x: Extraction, c: Corroboration,
       const source = c.products[i].holdingSource;
       touched.add(source);
       insert.run({ reportId: id, source, provider: p.provider, type: p.productType, account: normalizeAccount(p.accountNumber), name: p.name,
-        owner: x.owner, balance: p.balance, currency: p.currency, asOf: x.asOf, liquidity: p.liquidityDate });
+        owner: x.owner, balance: p.balance, currency: p.currency, asOf: x.asOf, liquidity: p.liquidityDate, returns: p.returns ? JSON.stringify(p.returns) : null });
     });
     const latest = new Map(knownProducts(db).map(k => [k.holdingSource, k]));
     const point = (source: string, balance?: number) => {
@@ -174,7 +200,8 @@ export function applyReport(db: DB, id: number, x: Extraction, c: Corroboration,
       touched.add(source);
       insert.run({ reportId: id, source, provider: from?.provider ?? k!.provider, type: from?.product_type ?? k!.productType,
         account: from?.account_number ?? k!.accountNumber, name: from?.name ?? k!.name, owner: from?.owner ?? x.owner,
-        balance: balance ?? from?.balance ?? k!.balance, currency: from?.currency ?? k!.currency, asOf: x.asOf, liquidity: from?.liquidity_date ?? null });
+        balance: balance ?? from?.balance ?? k!.balance, currency: from?.currency ?? k!.currency, asOf: x.asOf, liquidity: from?.liquidity_date ?? null,
+        returns: balance === 0 ? null : from?.returns ?? null });
     };
     // closed: a zero point on this date; kept from a replaced edition: its point carries over
     for (const source of c.closed) point(source, 0);
