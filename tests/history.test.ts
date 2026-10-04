@@ -112,7 +112,69 @@ describe('exchange history', () => {
     expect(calls).toEqual(['SOL/USDT', 'SOL/BTC']);
     expect(h.costs.get('SOL')).toEqual({ openedAt: '2024-04-01', costBasis: 1000, costSource: 'trades' });
     expect(h.costs.get('DOT')).toEqual({ openedAt: '2023-12-01', costBasis: null, costSource: null });
-    expect(h.warnings).toEqual(['withdrawal history: Invalid API-key, IP, or permissions for action']);
+    expect(h.warnings).toEqual(['withdrawal history: Invalid API-key, IP, or permissions for action', 'convert history: not supported']);
+  });
+
+  it('Binance Convert: a coin that came in via Convert gets its opening date and cost, read in windows of at most 30 days', async () => {
+    const windows: [number, number][] = [];
+    const ex: ExchangeClient = {
+      fetchBalance: async () => ({ total: {} }), fetchTickers: async () => ({}), loadMarkets: async () => ({}),
+      fetchMyTrades: async () => [],
+      fetchDeposits: async (_c, since) => (since! <= at('2024-01-02') && since! + 90 * 86_400_000 > at('2024-01-02')
+        ? [{ currency: 'USDT', amount: 1000, timestamp: at('2024-01-02'), status: 'ok' }] : []),
+      fetchWithdrawals: async () => [],
+      fetchConvertTradeHistory: async (_c, since, _l, params) => {
+        const until = Number(params?.until);
+        windows.push([since!, until]);
+        const rows = [
+          { id: 'a', timestamp: at('2024-01-10'), fromCurrency: 'USDT', fromAmount: 500, toCurrency: 'BNB', toAmount: 1, info: { orderStatus: 'SUCCESS' } },
+          { id: 'b', timestamp: at('2024-02-10'), fromCurrency: 'USDT', fromAmount: 400, toCurrency: 'BNB', toAmount: 1, info: { orderStatus: 'SUCCESS' } },
+          { id: 'c', timestamp: at('2024-02-11'), fromCurrency: 'USDT', fromAmount: 400, toCurrency: 'BNB', toAmount: 1, info: { orderStatus: 'FAIL' } },
+          { id: 'd', timestamp: at('2024-03-10'), fromCurrency: 'BNB', fromAmount: 1, toCurrency: 'USDT', toAmount: 450, info: { orderStatus: 'SUCCESS' } },
+        ];
+        return rows.filter(r => r.timestamp >= since! && r.timestamp <= until);
+      },
+    };
+    const h = await exchangeHistory(ex, 'binance', new Map([['BNB', 1]]), usd);
+    expect(windows.every(([a, b]) => b - a <= 30 * 86_400_000)).toBe(true);
+    expect(windows[0][0]).toBe(at('2024-01-02') - 30 * 86_400_000); // a month before the first deposit
+    // two units bought for 900, one sold at the average: one unit, cost 450, opened at the first conversion
+    expect(h.costs.get('BNB')).toEqual({ openedAt: '2024-01-10', costBasis: 450, costSource: 'trades' });
+    expect((h.raw.convert as unknown[]).length).toBe(4);
+    expect(h.warnings).toEqual([]);
+  });
+
+  it('Binance dust converted to BNB is a BNB buy at the dust coin\'s value, net of the charge', async () => {
+    const ex: ExchangeClient = {
+      fetchBalance: async () => ({ total: {} }), fetchTickers: async () => ({}), loadMarkets: async () => ({}), fetchMyTrades: async () => [],
+      // ccxt flips this one to BNB/USDT buy (that market exists); the raw row is what counts
+      fetchMyDustTrades: async () => [{ symbol: 'BNB/USDT', side: 'buy', amount: 0.02, cost: 10, timestamp: at('2024-06-01'),
+        info: { fromAsset: 'USDT', amount: '10', transferedAmount: '0.0196', serviceChargeAmount: '0.0004', operateTime: at('2024-06-01') } } as never],
+    };
+    const h = await exchangeHistory(ex, 'binance', new Map([['BNB', 0.0196]]), usd);
+    expect(h.costs.get('BNB')).toEqual({ openedAt: '2024-06-01', costBasis: 10, costSource: 'trades' });
+    // a dust coin with no USD price: valued at the BNB it gave
+    ex.fetchMyDustTrades = async () => [{ info: { fromAsset: 'NOPRICE', amount: '7', transferedAmount: '0.02', operateTime: at('2024-06-01') } } as never];
+    const h2 = await exchangeHistory(ex, 'binance', new Map([['BNB', 0.02]]), usd);
+    expect(h2.costs.get('BNB')).toEqual({ openedAt: '2024-06-01', costBasis: 10, costSource: 'trades' });
+  });
+
+  it('Binance: the held coin as quote (selling BTC for USDT buys USDT); a refused Convert endpoint is a warning', async () => {
+    const calls: string[] = [];
+    const ex: ExchangeClient = {
+      fetchBalance: async () => ({ total: {} }), fetchTickers: async () => ({}),
+      loadMarkets: async () => ({ 'BTC/USDT': {}, 'BTC/FDUSD': {}, 'DOGE/USDT': {} }),
+      fetchMyTrades: async symbol => {
+        calls.push(symbol!);
+        return symbol === 'BTC/USDT' ? [{ id: '1', symbol, side: 'sell', amount: 0.1, cost: 5000, timestamp: at('2024-05-01'),
+          fee: { cost: 5, currency: 'USDT' } }] : [];
+      },
+      fetchConvertTradeHistory: async () => { throw new Error('This endpoint has been disabled'); },
+    };
+    const h = await exchangeHistory(ex, 'binance', new Map([['USDT', 4995]]), usd);
+    expect(calls.sort()).toEqual(['BTC/USDT']); // DOGE is neither held, moved nor a major
+    expect(h.costs.get('USDT')).toEqual({ openedAt: '2024-05-01', costBasis: 5000, costSource: 'trades' });
+    expect(h.warnings).toEqual(['convert history: This endpoint has been disabled']);
   });
 
   it('every endpoint refused: nothing derived, the stored values stay', async () => {
