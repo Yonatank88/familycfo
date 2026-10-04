@@ -7,6 +7,8 @@ export interface Account {
   assetClass: string;
   /** top-level type (bank, cards_owed, stock, funds…) and, for funds, the sub-type (Pension, Study fund…) */
   type: string; subType: string | null;
+  /** first name of whose it is (the integration's owner, or the one printed on the report) */
+  owner: string | null;
   valueIls: number | null; value: number | null; currency: string; asOf: string | null; lastSuccessAt: string | null;
   stale: boolean; fxMissing: boolean;
 }
@@ -14,6 +16,8 @@ export interface Holding {
   id: number; symbol: string; name: string;
   /** the row's name: the symbol, or a report product's name as printed (••last4 only when two share a name) */
   label: string;
+  /** first name of whose it is */
+  owner: string | null;
   source: string; sourceLabel: string; assetClass: string;
   /** top-level type (stock, crypto, funds…) and, for funds, the sub-type (Pension, Study fund, Provident fund, Mutual fund) */
   type: string; subType: string | null;
@@ -58,6 +62,7 @@ export interface Catalog {
 }
 export interface ConfigEntry {
   key: string; type: IntegrationType; id: string; label: string; disabled: boolean; companyId?: string; exchange?: string;
+  owner: string | null;
   /** filled or not, and "••••1234" — never the value */
   fields: Record<string, { filled: boolean; masked: string | null }>;
   networks?: string[]; wallets?: { address: string; label?: string }[]; linked?: boolean;
@@ -65,6 +70,8 @@ export interface ConfigEntry {
 export interface Draft {
   type: IntegrationType; companyId?: string; exchange?: string; fields: Record<string, string>;
   networks?: string[]; wallets?: { address: string; label?: string }[];
+  /** absent keeps it, blank removes it */
+  owner?: string;
 }
 
 export type ReportStatus = 'extracting' | 'needs_review' | 'applied' | 'superseded' | 'failed';
@@ -85,6 +92,8 @@ export interface ReportDetail extends Omit<ReportItem, 'products' | 'questions'>
 export type IntegrationStatus = 'ok' | 'failed' | 'stale' | 'not_configured' | 'disabled';
 export interface Integration {
   id: string; key: string; label: string; kind: 'bank' | 'card' | 'investment'; status: IntegrationStatus;
+  /** first name */
+  owner: string | null;
   lastSuccessAt: string | null; lastAttemptAt: string | null; lastError: string | null;
   accounts: number; holdings: number | null; valueIls: number | null;
   /** the last 10, oldest first */
@@ -136,5 +145,7 @@ export const api = {
   },
   answerReport: (id: number, answers: Record<string, string>, edits: { asOf?: string; balances?: Record<string, number> }) =>
     post<{ id: number; status: ReportStatus }>(`/api/reports/${id}/answers`, { answers, edits }),
+  setReportOwner: (id: number, owner: string) => request<{ id: number }>(`/api/reports/${id}/owner`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner }) }),
   deleteReport: (id: number) => request<{ ok: true }>(`/api/reports/${id}`, { method: 'DELETE' }),
 };

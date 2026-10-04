@@ -8,7 +8,10 @@ import { fetchWallets, type WalletsSource } from './wallets.js';
 import { fetchExchange, type ExchangeSource } from './exchange.js';
 
 /** `investments[]` in accounts.json: brokers, wallets and exchanges whose positions become holdings. */
-export type InvestmentSource = (IbkrSource | WalletsSource | ExchangeSource) & { /** kept in the file, skipped by every run */ disabled?: boolean };
+export type InvestmentSource = (IbkrSource | WalletsSource | ExchangeSource) & {
+  /** kept in the file, skipped by every run */ disabled?: boolean;
+  /** whose it is (display only — not a secret); its holdings inherit it */ owner?: string;
+};
 
 /** The id a source is known by: SCRAPE_ONLY, sync status, `data/raw/<id>/`, and the prefix of its holdings' source. */
 export const investmentSourceId = (s: InvestmentSource) => s.id ?? (s.type === 'exchange' ? s.exchange : s.type);

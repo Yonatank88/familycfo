@@ -121,6 +121,7 @@ export function ReportPanel({ id, onClose }: { id: number; onClose: () => void }
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [balances, setBalances] = useState<Record<string, string>>({});
   const [date, setDate] = useState('');
+  const [owner, setOwner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { setAnswers({}); setBalances({}); setDate(r?.asOf ?? ''); }, [r?.status, r?.asOf]);
@@ -147,7 +148,6 @@ export function ReportPanel({ id, onClose }: { id: number; onClose: () => void }
       meta={<span className="flex items-center gap-2">
         {r && <StatusChip status={r.status} />}
         {r?.asOf && <span>{day(r.asOf)}</span>}
-        {r?.owner && <span>· <bdi>{r.owner}</bdi></span>}
       </span>}
       footer={<>
         <button type="button" onClick={remove} className="min-h-9 font-medium text-muted hover:text-down">Delete</button>
@@ -157,6 +157,18 @@ export function ReportPanel({ id, onClose }: { id: number; onClose: () => void }
         </div>
       </>}>
       <div className="space-y-6">
+        {r && (
+          <form className="flex items-center gap-2 text-sm" onSubmit={e => {
+            e.preventDefault();
+            if (owner == null) return;
+            setError(null);
+            api.setReportOwner(r.id, owner).then(() => { setOwner(null); refresh(); }).catch(err => setError((err as Error).message));
+          }}>
+            <label htmlFor="report-owner" className="text-muted">Owner</label>
+            <input id="report-owner" value={owner ?? r.owner ?? ''} onChange={e => setOwner(e.target.value)} dir="auto" className={`${field} min-h-9 flex-1`} />
+            {owner != null && owner !== (r.owner ?? '') && <button type="submit" className={button}>Save</button>}
+          </form>
+        )}
         {r?.error && <p className="text-sm text-down">{r.error}</p>}
         {review && r.questions.length > 0 && (
           <ol className="space-y-4">

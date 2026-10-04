@@ -4,6 +4,7 @@ import { localDate } from '../ingest/normalize.js';
 import { addDays, cleanMerchantName, maskLast4, merchantKey, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
 import { holdingValues } from './investments.js';
+import { reportOwners } from './owners.js';
 
 export type Range = '1M' | '3M' | 'YTD' | '1Y' | 'All';
 export const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
@@ -166,8 +167,11 @@ function sourceStatus(db: DB) {
   `).all() as { source: string; ok: number; error: string | null; started_at: string; last_ok: string | null; as_of: string | null }[];
 }
 
-/** `/api/summary`: net worth and its buckets now, the accounts, the holdings and the allocation. */
-export function summary(db: DB, asOf = today()) {
+/**
+ * `/api/summary`: net worth and its buckets now, the accounts, the holdings and the allocation. `owners`: each
+ * integration's owner by source id (configOwners) — its accounts and holdings inherit it; report products carry their own.
+ */
+export function summary(db: DB, asOf = today(), owners: Map<string, string> = new Map()) {
   const now = dailyValues(db, asOf, asOf)[0]?.rows ?? [];
   const status = new Map(sourceStatus(db).map(s => [s.source, s]));
   const stale = (source: string) => {
@@ -232,6 +236,8 @@ export function summary(db: DB, asOf = today()) {
 
   const invested = holdings.reduce((a, h) => a + (h.valueIls ?? 0), 0);
   const liquid = liquidityDates(db);
+  const printed = reportOwners(db);
+  const ownerOf = (source: string) => (source.startsWith('report:') ? printed.get(source) : owners.get(source)) ?? null;
   const allocation = (key: (s: Snap) => string, label: (k: string) => string) => {
     const by = new Map<string, number>();
     for (const s of now) if (s.bucket !== 'cards_owed') by.set(key(s), (by.get(key(s)) ?? 0) + s.value_ils);
@@ -243,11 +249,11 @@ export function summary(db: DB, asOf = today()) {
     ...bucketsOf(now),
     usdRate: rateToIls(db, 'USD', asOf),
     // type: the top-level type (bank, cards_owed, stock, funds…) the sidebar groups by; subType: Pension, Study fund…
-    accounts: accounts.map(a => ({ ...a, type: topType(a.assetClass), subType: subTypeOf(a.assetClass) })),
+    accounts: accounts.map(a => ({ ...a, type: topType(a.assetClass), subType: subTypeOf(a.assetClass), owner: ownerOf(a.source) })),
     holdings: holdings
       .sort((a, b) => (b.valueIls ?? 0) - (a.valueIls ?? 0))
       .map(h => ({
-        id: h.id, symbol: h.symbol, name: h.name, label: reports.get(h.holdingSource) ?? h.symbol, source: h.source, sourceLabel: h.source === 'report' ? h.broker ?? 'Report' : sourceLabel(h.source),
+        id: h.id, symbol: h.symbol, name: h.name, label: reports.get(h.holdingSource) ?? h.symbol, owner: ownerOf(h.source === 'report' ? h.holdingSource : h.source), source: h.source, sourceLabel: h.source === 'report' ? h.broker ?? 'Report' : sourceLabel(h.source),
         assetClass: h.assetClass, type: topType(h.assetClass), subType: subTypeOf(h.assetClass), liquidityDate: liquid.get(h.holdingSource) ?? null,
         quantity: h.quantity, currency: h.currency, price: h.price, value: h.value, valueIls: h.valueIls, fxMissing: h.valueIls == null,
         gainIls: h.gainIls, gainPct: h.gainPct,

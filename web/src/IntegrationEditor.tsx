@@ -100,7 +100,8 @@ export default function IntegrationEditor({ mode, onClose }: { mode: EditorMode;
   const [keepData, setKeepData] = useState(true);
 
   useEffect(() => {
-    if (entry && !draft) setDraft({ type: entry.type, companyId: entry.companyId, exchange: entry.exchange, fields: {}, networks: entry.networks, wallets: entry.wallets });
+    if (entry && !draft) setDraft({ type: entry.type, companyId: entry.companyId, exchange: entry.exchange, fields: {}, networks: entry.networks, wallets: entry.wallets,
+      owner: entry.owner ?? '' });
   }, [entry, draft]);
 
   const refresh = () => qc.invalidateQueries({ predicate: q => q.queryKey[0] !== 'scrape' });
@@ -154,6 +155,10 @@ export default function IntegrationEditor({ mode, onClose }: { mode: EditorMode;
                 <datalist id="exchanges">{catalog.exchange.suggestions.map(x => <option key={x} value={x} />)}</datalist>
               </div>
             )}
+            <div>
+              <label className={label} htmlFor="owner">Owner<span className="font-normal text-faint"> · optional</span></label>
+              <input id="owner" value={draft.owner ?? ''} onChange={e => setDraft({ ...draft, owner: e.target.value })} dir="auto" autoComplete="off" className={input} />
+            </div>
             {fieldsFor(catalog, draft).map(f => {
               const current = entry?.fields[f.name];
               return (

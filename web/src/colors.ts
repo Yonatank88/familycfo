@@ -21,8 +21,9 @@ export const ACCOUNT_GROUPS = [
 export const accountGroup = (a: Account): (typeof ACCOUNT_GROUPS)[number]['key'] =>
   a.type === 'bank' || a.type === 'cards_owed' ? 'bank' : a.type === 'funds' ? 'funds' : 'investments';
 
-/** An account row's second line: its source (when the label doesn't already say it) and sub-type. */
-export const accountSub = (a: Account) => [
+/** An account row's second line: owner, its source (when the label doesn't already say it), sub-type. */
+export const accountSub = (a: Account): string[] => [
+  a.owner,
   a.label.includes(a.sourceLabel) ? null : a.sourceLabel,
   a.subType,
-].filter(Boolean).join(' · ');
+].filter((x): x is string => !!x);

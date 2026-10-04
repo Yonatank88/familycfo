@@ -21,6 +21,11 @@ export function Name({ text }: { text: string }) {
   return m ? <span><bdi>{m[1]}</bdi>{m[2]}</span> : <bdi>{text}</bdi>;
 }
 
+/** Parts joined by " · ", each in its own direction (a Hebrew owner can't reorder its neighbours). */
+export function Parts({ parts }: { parts: (string | null | undefined)[] }) {
+  return <>{parts.filter(Boolean).map((p, i) => <span key={i}>{i > 0 && ' · '}<bdi>{p}</bdi></span>)}</>;
+}
+
 /** A rounded card: title top-left, an optional quiet action top-right. */
 export function Card({ title, action, children, className = '', flush = false }: {
   title: ReactNode; action?: ReactNode; children: ReactNode; className?: string; flush?: boolean;
@@ -121,7 +126,9 @@ export function SidePanel({ open = true, onClose, kicker, title, meta, children,
 }) {
   return (
     <Sheet open={open} onOpenChange={o => { if (!o) onClose(); }}>
-      <SheetContent className={cn('w-full gap-0 border-line bg-paper p-0 sm:max-w-xl', wide && 'sm:max-w-2xl')}>
+      {/* focus the panel itself on open, not its first button (which may be Delete) */}
+      <SheetContent className={cn('w-full gap-0 border-line bg-paper p-0 outline-none sm:max-w-xl', wide && 'sm:max-w-2xl')}
+        onOpenAutoFocus={e => { e.preventDefault(); (e.currentTarget as HTMLElement).focus(); }}>
         <div className="px-6 pb-4 pr-12 pt-6">
           <SheetDescription className="truncate text-xs text-muted">{kicker}</SheetDescription>
           <SheetTitle className="mt-0.5 text-lg font-semibold tracking-tight text-ink">{title}</SheetTitle>

@@ -18,7 +18,7 @@ const KIND: Record<Integration['kind'], string> = { bank: 'Bank', card: 'Card', 
 
 /** One row of the table: an integration, or the uploaded reports as a row of type "Upload". */
 interface Row {
-  key: string; label: string; type: string; status: keyof typeof STATUS; error: string | null;
+  key: string; label: string; type: string; owner: string | null; status: keyof typeof STATUS; error: string | null;
   lastSuccessAt: string | null; lastAttemptAt: string | null; runs: Integration['runs'] | null; valueIls: number | null;
   edit: () => void; editLabel: string;
 }
@@ -74,12 +74,12 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
   const r = data.reports;
   const rows: Row[] = [
     ...data.sources.map(s => ({
-      key: s.key, label: s.label, type: KIND[s.kind], status: s.status, error: s.lastError,
+      key: s.key, label: s.label, type: KIND[s.kind], owner: s.owner, status: s.status, error: s.lastError,
       lastSuccessAt: s.lastSuccessAt, lastAttemptAt: s.lastAttemptAt, runs: s.runs, valueIls: s.valueIls,
       edit: () => onEdit(s.key), editLabel: 'Edit',
     })),
     {
-      key: 'reports', label: 'Reports', type: 'Upload', status: r.needsReview.length ? 'review' : r.imported ? 'ok' : 'not_configured',
+      key: 'reports', label: 'Reports', type: 'Upload', owner: null, status: r.needsReview.length ? 'review' : r.imported ? 'ok' : 'not_configured',
       error: r.failed ? `${r.failed} failed` : null, lastSuccessAt: r.lastImportAt, lastAttemptAt: null, runs: null, valueIls: r.valueIls,
       edit: () => setReportList(true), editLabel: 'Open',
     },
@@ -92,7 +92,7 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
         <Table>
           <TableHeader>
             <TableRow className="border-line hover:bg-transparent">
-              {['Source', 'Type', 'Status', 'Last success', 'Runs', 'Value', ''].map((h, i) => (
+              {['Source', 'Type', 'Owner', 'Status', 'Last success', 'Runs', 'Value', ''].map((h, i) => (
                 <TableHead key={i} className={`h-10 px-4 text-[11px] font-medium uppercase tracking-wide text-faint first:pl-5 last:pr-5 ${h === 'Value' ? 'text-right' : ''}`}>{h}</TableHead>
               ))}
             </TableRow>
@@ -102,6 +102,7 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
               <TableRow key={x.key} className="border-line hover:bg-paper">
                 <TableCell className="px-4 py-3 pl-5 font-medium text-ink"><bdi>{x.label}</bdi></TableCell>
                 <TableCell className="px-4 py-3 text-muted">{x.type}</TableCell>
+                <TableCell className="px-4 py-3 text-faint"><bdi>{x.owner}</bdi></TableCell>
                 <TableCell className="px-4 py-3"><StatusBadge status={x.status} error={x.error} /></TableCell>
                 <TableCell className="px-4 py-3"><LastSuccess r={x} /></TableCell>
                 <TableCell className="px-4 py-3">{x.runs ? <Runs runs={x.runs} /> : <span className="text-faint">—</span>}</TableCell>
@@ -123,7 +124,7 @@ export default function Integrations({ currency, convert, reports, onOpenReport,
               <span aria-label={STATUS[x.status].label} className={`h-2 w-2 shrink-0 rounded-full ${STATUS[x.status].dot}`} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-ink"><bdi>{x.label}</bdi></span>
-                <span className="block text-xs text-faint">{x.lastSuccessAt ? ago(x.lastSuccessAt) : '—'}</span>
+                <span className="block text-xs text-faint">{x.owner && <><bdi>{x.owner}</bdi> · </>}{x.lastSuccessAt ? ago(x.lastSuccessAt) : '—'}</span>
               </span>
               <span className="shrink-0 text-sm tabular-nums text-ink">{value(x.valueIls)}</span>
             </button>

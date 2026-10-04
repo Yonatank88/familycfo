@@ -8,7 +8,7 @@ import { api, type ExpenseMonth, type Group, type Holding, type History, type Ra
 import { OTHER, PALETTE, TYPE_COLORS, TYPE_LABELS } from './colors';
 import { day, money, monthLong, monthShort, pct, shortDay, signedMoney, signedPct, type Currency } from './format';
 import { AccountGroups } from './Layout';
-import { Card, CardLink, ChangeChip, Dot, Name, Segmented, SidePanel, SubTag } from './ui';
+import { Card, CardLink, ChangeChip, Dot, Name, Parts, Segmented, SidePanel, SubTag } from './ui';
 import { cn } from '@/lib/utils';
 
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'All'];
@@ -249,10 +249,10 @@ const groupLabel = (g: string) => TYPE_LABELS[g] ?? g;
 const groupColor = (g: string) => TYPE_COLORS[g] ?? OTHER;
 
 /** A holding's second line: its source (unless the name already says it) and its name (when not the row's label). */
-const holdingSub = (h: Holding) => [
+const holdingSub = (h: Holding): string[] => [
   h.name.includes(h.sourceLabel) || h.label.includes(h.sourceLabel) ? null : h.sourceLabel,
   h.label.includes(h.name) || h.name === h.symbol ? null : h.name,
-].filter(Boolean).join(' · ');
+].filter((x): x is string => !!x);
 
 const valueIls = (h: Holding) => h.valueIls ?? -Infinity;
 
@@ -272,6 +272,7 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
   const money$ = (h: Holding) => (h.valueIls == null ? money(h.value, h.currency) : money(convert(h.valueIls), currency));
   const columns = useMemo<ColumnDef<Holding>[]>(() => [
     { id: 'name', accessorFn: h => h.label, header: ({ column }) => <SortHead label="Name" column={column} align="left" /> },
+    { id: 'owner', accessorFn: h => h.owner ?? '', header: ({ column }) => <SortHead label="Owner" column={column} align="left" /> },
     { id: 'value', accessorFn: valueIls, header: ({ column }) => <SortHead label="Value" column={column} /> },
     { id: 'weight', accessorFn: h => h.pctOfInvestments ?? -Infinity, header: ({ column }) => <SortHead label="Weight" column={column} /> },
     { id: 'change', accessorFn: h => h.changePct ?? -Infinity, header: ({ column }) => <SortHead label="Change" column={column} /> },
@@ -291,7 +292,7 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
   const th = 'px-2 sm:px-3 py-1 text-[11px] font-medium text-faint first:pl-5 last:pr-5';
   const td = 'px-2 sm:px-3 py-2 first:pl-5 last:pr-5';
   const headers = table.getHeaderGroups()[0].headers;
-  const hide: Record<string, string> = { weight: 'max-md:hidden', change: '', gain: 'max-lg:hidden' };
+  const hide: Record<string, string> = { owner: 'max-md:hidden', weight: 'max-md:hidden', change: '', gain: 'max-lg:hidden' };
 
   return (
     <Card title="Holdings" flush className="lg:col-span-2">
@@ -301,7 +302,7 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
           <thead>
             <tr className="border-b border-line">
               {headers.map(h => (
-                <th key={h.id} className={cn(th, h.id === 'name' ? 'text-left' : 'text-right', hide[h.id])}>
+                <th key={h.id} className={cn(th, h.id === 'name' || h.id === 'owner' ? 'text-left' : 'text-right', hide[h.id])}>
                   {h.isPlaceholder ? null : typeof h.column.columnDef.header === 'function' ? h.column.columnDef.header(h.getContext()) : null}
                 </th>
               ))}
@@ -313,6 +314,7 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
               <tbody key={g.key} className="border-b border-line last:border-0">
                 <tr className="bg-paper/60">
                   <td className={cn(td, 'py-1.5')}><span className="flex items-center gap-2 text-xs font-semibold text-ink"><Dot color={groupColor(g.key)} />{groupLabel(g.key)}</span></td>
+                  <td className={cn(td, hide.owner)} />
                   <td className={cn(td, 'py-1.5 text-right text-xs font-semibold tabular-nums text-ink')}>{money(convert(g.total), currency)}</td>
                   <td className={cn(td, 'py-1.5 text-right text-xs tabular-nums text-muted', hide.weight)}>{pct(g.weight)}</td>
                   {funds
@@ -325,8 +327,13 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
                     <tr key={h.id} className="hover:bg-paper">
                       <td className={td}>
                         <div className="flex flex-wrap items-center gap-x-2 font-medium text-ink"><Name text={h.label} />{h.subType && <SubTag>{h.subType}</SubTag>}</div>
-                        {sub && <div className="text-xs text-faint"><bdi>{sub}</bdi></div>}
+                        {(sub.length > 0 || h.owner) && (
+                          <div className="text-xs text-faint">
+                            {h.owner && <span className="md:hidden"><bdi>{h.owner}</bdi>{sub.length > 0 && ' · '}</span>}<Parts parts={sub} />
+                          </div>
+                        )}
                       </td>
+                      <td className={cn(td, 'text-xs text-faint', hide.owner)}><bdi>{h.owner}</bdi></td>
                       <td className={cn(td, 'whitespace-nowrap text-right tabular-nums', h.fxMissing ? 'text-warn' : 'text-ink')}>{money$(h)}</td>
                       <td className={cn(td, 'whitespace-nowrap text-right tabular-nums text-muted', hide.weight)}>{pct(h.pctOfInvestments)}</td>
                       {funds ? (
@@ -362,7 +369,8 @@ function Holdings({ holdings, currency, convert }: { holdings: Holding[]; curren
                   <div className="min-w-0 flex-1">
                     <div className="break-words text-sm font-medium text-ink"><Name text={h.label} /></div>
                     <div className="flex items-center gap-1.5 truncate text-xs text-faint">
-                      {h.subType ? <SubTag>{h.subType}</SubTag> : <bdi>{holdingSub(h)}</bdi>}
+                      {h.owner && <bdi>{h.owner}</bdi>}
+                      {h.subType ? <SubTag>{h.subType}</SubTag> : !h.owner && <Parts parts={holdingSub(h)} />}
                     </div>
                   </div>
                   <div className="shrink-0 text-right tabular-nums">

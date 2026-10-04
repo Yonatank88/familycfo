@@ -59,7 +59,7 @@ export function listIntegrations(config: Config) {
     const id = String(a.companyId);
     const specs = bankFields(id) ?? Object.keys(a.credentials ?? {}).map(f => field(f));
     return {
-      key: keyOf('accounts', id), type: 'bank' as const, id, companyId: id, label: SOURCE_NAMES[id] ?? id, disabled: !!a.disabled,
+      key: keyOf('accounts', id), type: 'bank' as const, id, companyId: id, label: SOURCE_NAMES[id] ?? id, disabled: !!a.disabled, owner: a.owner ?? null,
       fields: masked(a.credentials ?? {}, specs),
       ...(id === 'oneZero' ? { linked: filled(a.credentials?.idToken) } : {}),
     };
@@ -67,7 +67,7 @@ export function listIntegrations(config: Config) {
   const investments = (config.investments ?? []).map(raw => {
     const s = raw as InvestmentEntry;
     const id = investmentSourceId(s);
-    const base = { key: keyOf('investments', id), type: s.type as IntegrationType, id, label: SOURCE_NAMES[id] ?? id, disabled: !!s.disabled,
+    const base = { key: keyOf('investments', id), type: s.type as IntegrationType, id, label: SOURCE_NAMES[id] ?? id, disabled: !!s.disabled, owner: s.owner ?? null,
       fields: masked(s as unknown as Record<string, unknown>, catalog()[s.type as 'ibkr' | 'exchange' | 'wallets']?.fields ?? []) };
     if (s.type === 'exchange') return { ...base, exchange: s.exchange };
     if (s.type === 'wallets') return { ...base, networks: s.networks ?? ['eth-mainnet'], wallets: s.wallets ?? [] };
@@ -84,6 +84,15 @@ export interface Draft {
   fields?: Record<string, string>;
   networks?: string[];
   wallets?: { address: string; label?: string }[];
+  /** whose it is (not a secret): absent keeps it, blank removes it */
+  owner?: string;
+}
+
+/** Set or clear an entry's owner from the draft (absent: unchanged). */
+function applyOwner(entry: Record<string, unknown>, owner: string | undefined) {
+  if (owner === undefined) return;
+  const v = String(owner).trim().slice(0, 80);
+  if (v) entry.owner = v; else delete entry.owner;
 }
 
 const bad = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
@@ -118,7 +127,10 @@ export function applyDraft(config: Config, draft: Draft, key?: string): { config
   if (!specs) throw bad(`unknown integration ${draft.type === 'bank' ? `company "${draft.companyId}"` : `type "${draft.type}"`}`);
   const allowed = new Set(specs.map(f => f.name));
   for (const k of Object.keys(values)) if (!allowed.has(k)) throw bad(`unknown field "${k}"`);
+  // an edit that types no credential (e.g. only the owner) leaves the credentials as they are, even when some are empty
+  // (Hapoalim logged into by hand); anything typed, or a new entry, needs every required field
   const requireAll = (entry: Record<string, unknown>) => {
+    if (at && Object.keys(values).length === 0) return;
     const missing = specs.filter(f => !f.optional && !filled(entry[f.name])).map(f => f.label);
     if (missing.length) throw bad(`missing: ${missing.join(', ')}`);
   };
@@ -130,6 +142,7 @@ export function applyDraft(config: Config, draft: Draft, key?: string): { config
     const entry = (at ? next.accounts[at.index] : { companyId, credentials: {} }) as AccountEntry;
     entry.credentials = { ...(entry.credentials ?? {}), ...values };
     requireAll(entry.credentials);
+    applyOwner(entry as unknown as Record<string, unknown>, draft.owner);
     if (!at) next.accounts.push(entry as Config['accounts'][number]);
     return { config: next, key: keyOf('accounts', companyId) };
   }
@@ -155,6 +168,7 @@ export function applyDraft(config: Config, draft: Draft, key?: string): { config
     if (!(entry.wallets as unknown[] | undefined)?.length) throw bad('add at least one wallet address');
   }
   requireAll(entry);
+  applyOwner(entry, draft.owner);
   const source = entry as unknown as InvestmentSource;
   if (!existing) {
     // a second account of the same type/exchange gets an id of its own

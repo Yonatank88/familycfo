@@ -5,11 +5,12 @@ import { writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { basename, join } from 'path';
 import { getDb } from '../db/connection.js';
-import { answerReport, deleteReport, failInterrupted, listReports, processReport, registerReport, reportDetail } from '../reports/index.js';
+import { answerReport, deleteReport, failInterrupted, listReports, processReport, registerReport, reportDetail, setReportOwner } from '../reports/index.js';
 import { scrapeRunning, scrapeState, startScrape, submitOtp } from './scrapeJob.js';
 import { RANGES, expenseRowsOf, expenses, history, rangeStart, summary, type Range } from '../analytics/summary.js';
 import { priceChangeSince } from '../analytics/quotes.js';
 import { configuredSources, integrations } from '../analytics/integrations.js';
+import { configOwners } from '../analytics/owners.js';
 // which sources are configured and whether their credentials are filled — the values never leave configuredSources
 import { ACCOUNTS_FILE, loadConfig } from '../config.js';
 // add / edit / remove integrations: secrets come in, only masked values go out
@@ -33,6 +34,9 @@ const idOf = (params: unknown) => {
   if (!Number.isInteger(id) || id < 1) throw badRequest('bad report id');
   return id;
 };
+/** accounts.json, or null when there is none (every source is then "not configured", no one owns anything) */
+const configOrNull = () => { try { return loadConfig(); } catch { return null; } };
+
 const rangeOf = (v: unknown): Range => {
   const r = String(v ?? '1Y');
   if (!RANGES.includes(r as Range)) throw badRequest(`range must be one of ${RANGES.join(', ')}`);
@@ -42,7 +46,8 @@ const rangeOf = (v: unknown): Range => {
 // net worth, buckets, accounts and holdings (each with its price change over `range`, when it has a quote)
 app.get('/api/summary', async req => {
   const range = rangeOf((req.query as Record<string, string>).range);
-  const s = summary(db);
+  // each integration's owner (display only) — inherited by its accounts and holdings
+  const s = summary(db, undefined, configOwners(configOrNull()));
   const from = rangeStart(db, range);
   const quoted = new Set(db.prepare(`SELECT symbol FROM holdings WHERE archived = 0 AND manual_price IS NULL`).pluck().all() as string[]);
   const changes = await Promise.all(s.holdings.map(h => (quoted.has(h.symbol) ? priceChangeSince(h.symbol, from) : Promise.resolve(null))));
@@ -82,11 +87,7 @@ app.addHook('onRequest', async (req, reply) => {
 });
 
 // every input source's health from source_runs, what it brings, and the reports (read-only)
-app.get('/api/integrations', async () => {
-  let config = null;
-  try { config = loadConfig(); } catch { /* no accounts.json: every source is "not configured" */ }
-  return integrations(db, configuredSources(config));
-});
+app.get('/api/integrations', async () => integrations(db, configuredSources(configOrNull())));
 
 // the integrations in accounts.json (secrets masked) and what can be added
 app.get('/api/integrations/config', async () => ({ catalog: catalog(), integrations: listIntegrations(readConfigFile(ACCOUNTS_FILE)) }));
@@ -175,6 +176,11 @@ app.post('/api/reports/:id/answers', async req => {
   const answers = Object.fromEntries(Object.entries(body.answers ?? {}).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v));
   const balances = Object.fromEntries(Object.entries(body.edits?.balances ?? {}).map(([k, v]) => [k, Number(v)]).filter(([, v]) => Number.isFinite(v)));
   const r = await answerReport(db, idOf(req.params), answers, { asOf: body.edits?.asOf ? String(body.edits.asOf) : undefined, balances });
+  return { id: r.id, status: r.status };
+});
+// the owner printed on the report, corrected from the review panel
+app.put('/api/reports/:id/owner', async req => {
+  const r = setReportOwner(db, idOf(req.params), String((req.body as { owner?: unknown })?.owner ?? ''));
   return { id: r.id, status: r.status };
 });
 app.delete('/api/reports/:id', async (req, reply) => (deleteReport(db, idOf(req.params)) ? { ok: true } : reply.code(404).send({ error: 'no such report' })));

@@ -3,6 +3,7 @@ import { BANK_COMPANIES } from '../db/ingestRepo.js';
 import type { Config } from '../scraper.js';
 import { investmentSourceId } from '../sync/index.js';
 import { round } from '../util.js';
+import { firstName } from './owners.js';
 import { STALE_MS, sourceLabel, summary } from './summary.js';
 
 /** `/api/integrations`: each input source's health (from source_runs), what it brings, and the reports. */
@@ -10,23 +11,26 @@ import { STALE_MS, sourceLabel, summary } from './summary.js';
 export type IntegrationStatus = 'ok' | 'failed' | 'stale' | 'not_configured' | 'disabled';
 
 /** A source from accounts.json — only whether its credentials are filled, never their values. */
-export interface ConfiguredSource { id: string; kind: 'bank' | 'card' | 'investment'; configured: boolean; disabled?: boolean }
+export interface ConfiguredSource { id: string; kind: 'bank' | 'card' | 'investment'; configured: boolean; disabled?: boolean; owner?: string }
 
 const filled = (v: unknown) => typeof v === 'string' && v.trim() !== '' && !/^YOUR_/.test(v.trim());
+
+/** The owner's first name, when set. */
+const owner = (full: string | undefined) => { const o = firstName(full); return o ? { owner: o } : {}; };
 
 export function configuredSources(config: Config | null): ConfiguredSource[] {
   if (!config) return [];
   const banks = (config.accounts ?? []).map(a => {
     const values = Object.values(a.credentials ?? {});
     return { id: String(a.companyId), kind: BANK_COMPANIES.has(String(a.companyId)) ? 'bank' as const : 'card' as const,
-      configured: values.length > 0 && values.every(filled), ...(a.disabled ? { disabled: true } : {}) };
+      configured: values.length > 0 && values.every(filled), ...(a.disabled ? { disabled: true } : {}), ...owner(a.owner) };
   });
   const investments = (config.investments ?? []).map(s => {
     const configured = s.type === 'ibkr' ? filled(s.token) && filled(s.queryId)
       : s.type === 'wallets' ? filled(s.apiKey) && (s.wallets ?? []).some(w => filled(w.address))
       : s.type === 'exchange' ? filled(s.apiKey) && filled(s.secret)
       : false;
-    return { id: investmentSourceId(s), kind: 'investment' as const, configured, ...(s.disabled ? { disabled: true } : {}) };
+    return { id: investmentSourceId(s), kind: 'investment' as const, configured, ...(s.disabled ? { disabled: true } : {}), ...owner(s.owner) };
   });
   return [...banks, ...investments];
 }
@@ -65,6 +69,7 @@ export function integrations(db: DB, sources: ConfiguredSource[], now = Date.now
       : { accounts: bankAccounts.get(src.id) as number, holdings: null };
     return {
       id: src.id, key: `${src.kind === 'investment' ? 'investments' : 'accounts'}:${src.id}`, label: sourceLabel(src.id), kind: src.kind,
+      owner: src.owner ?? null,
       status: integrationStatus({ configured: src.configured, disabled: src.disabled, lastRunOk: last ? last.ok : null, lastSuccessAt }, now),
       lastSuccessAt, lastAttemptAt: last?.at ?? null, lastError: last && !last.ok ? last.error : null,
       accounts: stats.accounts, holdings: stats.holdings, valueIls: valueOf(source => source === src.id),

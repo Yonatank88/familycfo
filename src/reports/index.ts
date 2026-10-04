@@ -278,6 +278,22 @@ export function reportDetail(db: DB, id: number) {
   };
 }
 
+/**
+ * Correct a report's owner (the review panel): the extraction's owner and every value point of the report — the
+ * products it touches show the new owner. Blank clears it.
+ */
+export function setReportOwner(db: DB, id: number, owner: string): ReportRow {
+  const report = getReport(db, id);
+  if (!report) throw Object.assign(new Error(`no report ${id}`), { statusCode: 404 });
+  const value = owner.trim().slice(0, 80) || null;
+  db.transaction(() => {
+    const x = json<Extraction | null>(report.extraction, null);
+    if (x) db.prepare(`UPDATE reports SET extraction = ? WHERE id = ?`).run(JSON.stringify({ ...x, owner: value }), id);
+    db.prepare(`UPDATE report_values SET owner = ? WHERE report_id = ?`).run(value, id);
+  })();
+  return getReport(db, id)!;
+}
+
 /** Reports left `extracting` by a process that stopped (the server restarted mid-extraction) can't finish. */
 export function failInterrupted(db: DB): number {
   return db.prepare(`UPDATE reports SET status = 'failed', error = 'interrupted — import the file again' WHERE status = 'extracting'`).run().changes;

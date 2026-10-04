@@ -39,6 +39,8 @@ interface AccountConfig {
   credentials: Record<string, string>;
   /** kept in the file, skipped by every run */
   disabled?: boolean;
+  /** whose it is (display only — not a secret); its accounts inherit it */
+  owner?: string;
 }
 
 export interface Config {
