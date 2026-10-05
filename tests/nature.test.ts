@@ -52,6 +52,27 @@ describe('nature: monthly', () => {
     expect(natureOf([...rows, tripled], tripled)).not.toBe('monthly');
   });
 
+  it('a café or grocer visited about once a month at a similar bill stays everyday', () => {
+    const visits = ['2026-02', '2026-03', '2026-04', '2026-05'].map(m => row('cafe mama', m, 120, { category: 'Going out' }));
+    const rows = [...background(), ...visits];
+    expect(visits.map(r => natureOf(rows, r))).toEqual(['everyday', 'everyday', 'everyday', 'everyday']);
+  });
+
+  it('three matching months among many scattered amounts is not recurring', () => {
+    const hits = ['2026-01', '2026-03', '2026-05'].map(m => row('hardware', m, 100));
+    const misses = ['2026-02', '2026-04', '2026-06'].flatMap(m => [row('hardware', m, 30), row('hardware', m, 400)]);
+    const rows = [...background(), ...hits, ...misses];
+    expect(hits.map(r => natureOf(rows, r))).not.toContain('monthly');
+  });
+
+  it('a changed price carries one month, not the next ones', () => {
+    const run = ['2026-01', '2026-02', '2026-03'].map(m => row('club', m, 100));
+    const a = row('club', '2026-04', 180), b = row('club', '2026-05', 330);
+    const rows = [...background(), ...run, a, b];
+    expect(natureOf(rows, a)).toBe('monthly');
+    expect(natureOf(rows, b)).not.toBe('monthly');
+  });
+
   it('installments, standing orders and Bills are monthly by definition', () => {
     const plan = row('ikea', '2026-06', 900, { installment: true });
     const order = row('ועד בית', '2026-06', 300, { standingOrder: true });

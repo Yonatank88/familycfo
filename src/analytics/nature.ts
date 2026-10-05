@@ -16,9 +16,17 @@ export const RECURRING_WINDOW_MONTHS = 6;
 export const RECURRING_MIN_MONTHS = 3;
 /** …at an amount within this fraction of the window's median charge… */
 export const RECURRING_AMOUNT_TOLERANCE = 0.25;
+/** …with at least this share of the window's charges at that amount… */
+export const RECURRING_MIN_STABLE_SHARE = 0.75;
 /** …and at most this many charges in a typical month (a supermarket visited weekly isn't a subscription). */
 export const RECURRING_MAX_CHARGES_PER_MONTH = 2;
-/** A price change: a recurring merchant's next month's single charge stays monthly within this ratio of the last one. */
+/** Categories never recurring by repetition alone: the café or grocer visited about monthly is still everyday. */
+export const RECURRING_EXCLUDED_CATEGORIES = ['Groceries', 'Going out'];
+/**
+ * A price change: after this many consecutive recurring months, the next month's single charge stays monthly within
+ * this ratio of the last one.
+ */
+export const PRICE_CHANGE_RUN_MONTHS = 2;
 export const PRICE_CHANGE_MAX_RATIO = 2;
 /** One-off: a merchant seen at most this many times in this many months (centred on the row)… */
 export const ONE_OFF_WINDOW_MONTHS = 12;
@@ -66,21 +74,22 @@ function recurringIds(charges: { id: number; m: number; amount: number }[]): Set
       if (median([...perMonth.values()].map(v => v.length)) > RECURRING_MAX_CHARGES_PER_MONTH) continue;
       const typical = median(inWindow.map(c => c.amount));
       const stable = [...perMonth.values()].filter(v => v.some(a => near(a, typical))).length;
-      if (stable >= RECURRING_MIN_MONTHS && near(r.amount, typical)) out.add(r.id);
+      const stableShare = inWindow.filter(c => near(c.amount, typical)).length / inWindow.length;
+      if (stable >= RECURRING_MIN_MONTHS && stableShare >= RECURRING_MIN_STABLE_SHARE && near(r.amount, typical)) out.add(r.id);
     }
   }
-  // a price change: the month after a recurring charge, the merchant's only charge stays recurring within the ratio
+  // a price change: after a run of recurring months, the next month's only charge stays recurring within the ratio
+  // (judged against the run itself, so one changed price doesn't carry the next)
   const byMonth = new Map<number, typeof charges>();
   for (const c of charges) byMonth.set(c.m, [...(byMonth.get(c.m) ?? []), c]);
+  const base = new Set(out);
   for (const m of [...byMonth.keys()].sort((a, b) => a - b)) {
     const list = byMonth.get(m)!;
-    const before = (byMonth.get(m - 1) ?? []).filter(c => out.has(c.id));
-    if (!before.length || list.length > RECURRING_MAX_CHARGES_PER_MONTH) continue;
-    const last = before[before.length - 1].amount;
-    for (const c of list) {
-      const ratio = c.amount / last;
-      if (!out.has(c.id) && ratio <= PRICE_CHANGE_MAX_RATIO && ratio >= 1 / PRICE_CHANGE_MAX_RATIO) out.add(c.id);
-    }
+    if (list.length !== 1 || base.has(list[0].id)) continue;
+    const run = Array.from({ length: PRICE_CHANGE_RUN_MONTHS }, (_, i) => (byMonth.get(m - 1 - i) ?? []).filter(c => base.has(c.id)));
+    if (run.some(l => !l.length)) continue;
+    const ratio = list[0].amount / run[0].at(-1)!.amount;
+    if (ratio <= PRICE_CHANGE_MAX_RATIO && ratio >= 1 / PRICE_CHANGE_MAX_RATIO) out.add(list[0].id);
   }
   return out;
 }
@@ -98,7 +107,8 @@ export function classifyNatures(rows: NatureInput[], asOfMonth?: string): Map<nu
   for (const r of rows) byMerchant.set(r.merchant, [...(byMerchant.get(r.merchant) ?? []), r]);
 
   for (const list of byMerchant.values()) {
-    const charges = list.filter(r => r.amount > 0 && !r.installment).map(r => ({ id: r.id, m: monthIndex(r.month), amount: r.amount }));
+    const charges = list.filter(r => r.amount > 0 && !r.installment && !RECURRING_EXCLUDED_CATEGORIES.includes(r.category ?? ''))
+      .map(r => ({ id: r.id, m: monthIndex(r.month), amount: r.amount }));
     const recurring = recurringIds(charges);
     const positive = list.filter(r => r.amount > 0);
     const decide = (r: NatureInput): Nature => {
