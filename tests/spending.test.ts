@@ -3,7 +3,8 @@ import { rmSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 import { CARD_PAYMENT_PATTERN, deriveKinds, findCategory, kindFor, matchesInvestment } from '../src/ingest/classify.js';
 import { matchCurrencyExchanges, reconcileCardBills } from '../src/ingest/transfers.js';
-import { CARD_NOT_ITEMISED, TRANSFERS_TO_PEOPLE, applyCategoryRules, ruleCategory } from '../src/categorize/rules.js';
+import { CARD_NOT_ITEMISED, TRANSFERS_TO_PEOPLE, abroadCategory, applyCategoryRules, isAbroad, ruleCategory } from '../src/categorize/rules.js';
+import { SPEND_CATEGORIES } from '../src/db/schema.js';
 import { categorizeMerchants, type MerchantCategorizer, type MerchantInput } from '../src/categorize/index.js';
 import { openDb, type DB } from '../src/db/connection.js';
 import { addAccount, addTx, kindOf, testDb } from './helpers.js';
@@ -132,37 +133,95 @@ describe('rules and the AI', () => {
   });
 });
 
-describe('categories in English (step 107)', () => {
-  it('renames the defaults, keeps the Hebrew names as aliases, adds the rule categories, leaves user categories', () => {
+describe('categories in English (step 107) and the spend categories (step 110)', () => {
+  it('a fresh database has the flat spend categories; old names, Hebrew and scraper names resolve to them', () => {
     const fresh = openDb(':memory:');
+    const spend = fresh.prepare(`SELECT name FROM categories WHERE kind = 'expense' AND parent_id IS NULL`).pluck().all() as string[];
+    expect(spend.sort()).toEqual([...SPEND_CATEGORIES].sort());
+    expect(fresh.prepare(`SELECT COUNT(*) FROM categories c JOIN categories p ON p.id = c.parent_id WHERE c.kind = 'expense'`).pluck().get()).toBe(0);
     const names = fresh.prepare(`SELECT name FROM categories`).pluck().all() as string[];
-    expect(names).toEqual(expect.arrayContaining(['Supermarket', 'Groceries & toiletries', 'Unknown', 'Other', TRANSFERS_TO_PEOPLE, CARD_NOT_ITEMISED]));
     expect(names.filter(n => /[֐-׿]/.test(n))).toEqual([]);
-    const supermarket = findCategory(fresh, 'Supermarket');
-    expect(findCategory(fresh, 'סופרמרקט')).toBe(supermarket);   // the old name
-    expect(findCategory(fresh, 'מזון וצריכה')).toBe(supermarket); // a scraper's name, aliased before the rename
-    // the tree shape is kept
-    expect(fresh.prepare(`SELECT p.name FROM categories c JOIN categories p ON p.id = c.parent_id WHERE c.name = 'Supermarket'`).pluck().get())
-      .toBe('Groceries & toiletries');
+    const groceries = findCategory(fresh, 'Groceries');
+    expect(findCategory(fresh, 'Supermarket')).toBe(groceries);  // a merged category's name
+    expect(findCategory(fresh, 'סופרמרקט')).toBe(groceries);     // its Hebrew name
+    expect(findCategory(fresh, 'מזון וצריכה')).toBe(groceries);  // a scraper's name
+    expect(findCategory(fresh, 'Restaurants & nightlife')).toBe(findCategory(fresh, 'Going out'));
+    expect(findCategory(fresh, 'Food abroad')).toBe(findCategory(fresh, 'Travel & abroad'));
+    expect(findCategory(fresh, 'Unknown')).toBe(findCategory(fresh, 'Other'));
+    expect(findCategory(fresh, 'Bank fees')).toBe(findCategory(fresh, 'Bills'));
+    // non-spend categories stay as they were
+    expect(fresh.prepare(`SELECT p.name FROM categories c JOIN categories p ON p.id = c.parent_id WHERE c.name = 'Salary'`).pluck().get()).toBe('Income');
+  });
 
-    // a 106 database: a default still in Hebrew, a category the user made, a cached merchant
+  it('upgrades a 106 database: renamed, then merged — rows, aliases and the merchant cache move, user categories stay', () => {
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-107-${process.pid}.db`;
     openDb(path).close();
     const raw = new Database(path);
     raw.exec(`DELETE FROM schema_version WHERE version >= 107; DROP TABLE account_balance_daily; ALTER TABLE accounts DROP COLUMN source;
-      DELETE FROM category_aliases WHERE name IN ('סופרמרקט', 'מזון וטואלטיקה');
-      UPDATE categories SET name = 'מזון וטואלטיקה' WHERE name = 'Groceries & toiletries';
-      UPDATE categories SET name = 'סופרמרקט' WHERE name = 'Supermarket';
+      DELETE FROM categories WHERE name IN (${SPEND_CATEGORIES.map(n => `'${n}'`).join(', ')}) AND name NOT IN ('Bills', 'Health', 'Other');
+      DELETE FROM category_aliases;
+      INSERT INTO categories (name, parent_id, kind) VALUES ('מזון וטואלטיקה', NULL, 'expense');
+      INSERT INTO categories (name, parent_id, kind) SELECT 'סופרמרקט', id, 'expense' FROM categories WHERE name = 'מזון וטואלטיקה';
+      INSERT INTO category_aliases (name, category_id) SELECT 'מזון וצריכה', id FROM categories WHERE name = 'סופרמרקט';
       INSERT INTO categories (name, kind) VALUES ('קפה', 'expense');
+      INSERT INTO accounts (id, company, kind) VALUES ('max:1', 'max', 'card');
+      INSERT INTO transactions (identifier, account_id, date, description, original_amount, charged_amount, category_id, category_source, kind)
+        SELECT 'x1', 'max:1', '2026-01-01', 'שופרסל', -10, -10, id, 'ai', 'expense' FROM categories WHERE name = 'סופרמרקט';
       INSERT INTO merchant_categories (merchant, category_id, source) SELECT 'שופרסל', id, 'ai' FROM categories WHERE name = 'סופרמרקט'`);
-    const id = raw.prepare(`SELECT id FROM categories WHERE name = 'סופרמרקט'`).pluck().get();
     raw.close();
     const db = openDb(path);
-    expect(db.prepare(`SELECT name FROM categories WHERE id = ?`).pluck().get(id)).toBe('Supermarket');
-    expect(findCategory(db, 'סופרמרקט')).toBe(id);
-    expect(db.prepare(`SELECT category_id FROM merchant_categories WHERE merchant = 'שופרסל'`).pluck().get()).toBe(id);
+    const groceries = db.prepare(`SELECT id FROM categories WHERE name = 'Groceries'`).pluck().get();
+    expect(findCategory(db, 'סופרמרקט')).toBe(groceries);
+    expect(findCategory(db, 'מזון וצריכה')).toBe(groceries);
+    expect(findCategory(db, 'Supermarket')).toBe(groceries);
+    expect(db.prepare(`SELECT category_id FROM merchant_categories WHERE merchant = 'שופרסל'`).pluck().get()).toBe(groceries);
+    expect(db.prepare(`SELECT category_id FROM transactions WHERE identifier = 'x1'`).pluck().get()).toBe(groceries);
+    expect(db.prepare(`SELECT COUNT(*) FROM categories WHERE name IN ('Supermarket', 'Groceries & toiletries')`).pluck().get()).toBe(0);
     expect(findCategory(db, 'קפה')).toBeDefined();
     db.close();
     rmSync(path, { force: true });
+  });
+});
+
+describe('purchases abroad', () => {
+  const isra = (country: string, israel: 0 | 1) => ({ isIsraelDeal: israel, countryCode: country, transactionDescription: israel ? 'עסקאות רגילות' : 'תיירות יוצאת קניות' });
+  it('Isracard non-Israel deals, Cal abroad flags, and foreign-currency card charges are abroad; bank rows never', () => {
+    expect(isAbroad({ accountKind: 'card', originalCurrency: 'ILS', raw: isra('NLD', 0) })).toBe(true);
+    expect(isAbroad({ accountKind: 'card', originalCurrency: 'EUR', raw: isra('ISR', 1) })).toBe(false);
+    expect(isAbroad({ accountKind: 'card', originalCurrency: 'ILS', raw: { isAbroadTransaction: 1 } })).toBe(true);
+    expect(isAbroad({ accountKind: 'card', originalCurrency: 'DKK', raw: { isAbroadTransaction: 0 } })).toBe(false);
+    expect(isAbroad({ accountKind: 'card', originalCurrency: 'EUR', raw: null })).toBe(true);
+    expect(isAbroad({ accountKind: 'card', originalCurrency: 'ILS', raw: null })).toBe(false);
+    expect(isAbroad({ accountKind: 'bank', originalCurrency: 'USD', raw: null })).toBe(false);
+  });
+  it('travel, except foreign subscriptions (Bills) and online shops (Consumerism); a bare PayPal is left to the AI', () => {
+    expect(abroadCategory('CARREFOUR MARKET')).toBe('Travel & abroad');
+    expect(abroadCategory('PAYPAL *SPOTIFY*P37823')).toBe('Bills');
+    expect(abroadCategory('APPLE.COM/BILL')).toBe('Bills');
+    expect(abroadCategory('OPENAI *CHATGPT SUBSCR')).toBe('Bills');
+    expect(abroadCategory('WWW.ALIEXPRESS.COM')).toBe('Consumerism');
+    expect(abroadCategory('APPLE STORE R633')).toBe('Travel & abroad');
+    expect(abroadCategory('PAYPAL *P330F7FAD9')).toBeNull();
+  });
+  it('the abroad rule beats the scraper and the AI, never a person; a row that stops being abroad gets its scraper category back', () => {
+    const db = testDb();
+    addAccount(db, 'isracard:1', 'card');
+    const add = (n: string) => Number(db.prepare(`INSERT INTO categories (name, kind) VALUES (?, 'expense')`).run(n).lastInsertRowid);
+    const going = add('Going out'); add('Travel & abroad'); add('Bills'); add('Consumerism');
+    db.prepare(`INSERT INTO category_aliases (name, category_id) VALUES ('מסעדות', ?)`).run(going);
+    const cafe = addTx(db, { account: 'isracard:1', date: '2026-05-01', description: 'LE PIGALLE', amount: -40, kind: 'expense', categoryId: going, raw: isra('FRA', 0) });
+    db.prepare(`UPDATE transactions SET category_source = 'scraper', source_category = 'מסעדות' WHERE id = ?`).run(cafe);
+    const manual = addTx(db, { account: 'isracard:1', date: '2026-05-01', description: 'SNCF', amount: -40, kind: 'expense', categoryId: going, raw: isra('FRA', 0) });
+    db.prepare(`UPDATE transactions SET category_source = 'manual' WHERE id = ?`).run(manual);
+    const spotify = addTx(db, { account: 'isracard:1', date: '2026-05-01', description: 'PAYPAL *SPOTIFY', amount: -20, kind: 'expense', raw: isra('GBR', 0) });
+    const home = addTx(db, { account: 'isracard:1', date: '2026-05-01', description: 'ארומה', amount: -20, kind: 'expense', raw: isra('ISR', 1) });
+    applyCategoryRules(db);
+    expect(category(db, cafe)).toEqual({ name: 'Travel & abroad', source: 'rule' });
+    expect(category(db, manual)).toEqual({ name: 'Going out', source: 'manual' });
+    expect(category(db, spotify)).toEqual({ name: 'Bills', source: 'rule' });
+    expect(category(db, home)).toEqual({ name: null, source: null });
+    db.prepare(`UPDATE transactions SET raw_json = ? WHERE id = ?`).run(JSON.stringify(isra('ISR', 1)), cafe);
+    applyCategoryRules(db);
+    expect(category(db, cafe)).toEqual({ name: 'Going out', source: 'scraper' });
   });
 });

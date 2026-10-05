@@ -59,6 +59,55 @@ function englishCategoriesSql(): string {
   return [...steps, ...added].join('\n');
 }
 
+/** The spend categories (all top level, no children). Transfers to people and Credit card (not itemised) are rule-only. */
+export const SPEND_CATEGORIES = ['Going out', 'Consumerism', 'Groceries', 'Bills', 'Transport', 'Travel & abroad', 'Health',
+  'Transfers to people', 'Credit card (not itemised)', 'Other'] as const;
+
+/** Step 110: every earlier spend category (English name) → the spend category it merges into. */
+export const SPEND_CATEGORY_MERGES: [string, string][] = [
+  ['Fast food', 'Going out'], ['Restaurants & nightlife', 'Going out'], ['Dining out', 'Going out'], ['Culture & leisure', 'Going out'],
+  ['Attractions', 'Travel & abroad'],
+  ['Clothing & shoes', 'Consumerism'], ['Electronics', 'Consumerism'], ['Pets', 'Consumerism'],
+  ['Cleaning', 'Consumerism'], ['Furniture', 'Consumerism'], ['Renovation & housewares', 'Consumerism'], ['Repairs', 'Consumerism'], ['Home', 'Consumerism'],
+  ['Gifts & events', 'Consumerism'], ['Gifts & donations', 'Consumerism'],
+  ['Hairdresser', 'Consumerism'], ['Cosmetics', 'Consumerism'], ['Sport & grooming', 'Consumerism'],
+  ['Disposables', 'Groceries'], ['Supermarket', 'Groceries'], ['Pharmacy', 'Groceries'], ['Fruit & vegetables', 'Groceries'], ['Groceries & toiletries', 'Groceries'],
+  ['Internet', 'Bills'], ['Municipal tax', 'Bills'], ['Gas', 'Bills'], ['Building fees', 'Bills'], ['Electricity', 'Bills'],
+  ['TV & entertainment', 'Bills'], ['Water', 'Bills'], ['Mobile', 'Bills'], ['Insurance', 'Bills'], ['Car insurance', 'Bills'],
+  ['Digital subscriptions', 'Bills'], ['Loans & mortgage', 'Bills'], ['Car loan', 'Bills'], ['Card fees', 'Bills'], ['Bank fees', 'Bills'],
+  ['Taxes, fines & fees', 'Bills'], ['Schools & kindergartens', 'Bills'], ['Classes', 'Bills'], ['Education & family', 'Bills'], ['Gym', 'Bills'],
+  ['Fuel & charging', 'Transport'], ['Parking', 'Transport'], ['Public transport', 'Transport'], ['Car maintenance', 'Transport'], ['Car & transport', 'Transport'],
+  ['Flights', 'Travel & abroad'], ['Hotels', 'Travel & abroad'], ['Cash abroad', 'Travel & abroad'], ['Food abroad', 'Travel & abroad'],
+  ['Shopping abroad', 'Travel & abroad'], ['Transport abroad', 'Travel & abroad'], ['Phone abroad', 'Travel & abroad'], ['Vacation', 'Travel & abroad'],
+  ['Foreign purchases', 'Travel & abroad'],
+  ['Unknown', 'Other'], ['Fines', 'Other'], ['Donations', 'Other'], ['Cash', 'Other'],
+];
+
+/**
+ * Step 110: the spend categories become the flat SPEND_CATEGORIES. Each earlier spend category merges into its new one:
+ * its name stays as an alias (so scraper categories, rules and AI answers still resolve), and its rows, aliases,
+ * merchant_categories cache rows and any children move over before it is deleted. Categories the user made, and
+ * non-spend ones (income, savings, transfers), are left alone.
+ */
+function spendCategoriesSql(): string {
+  const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
+  const id = (name: string) => `(SELECT id FROM categories WHERE name = ${q(name)})`;
+  const add = SPEND_CATEGORIES.map(n => `INSERT OR IGNORE INTO categories (name, parent_id, kind) VALUES (${q(n)}, NULL, 'expense');\n`
+    + `UPDATE categories SET parent_id = NULL WHERE name = ${q(n)};`);
+  const merges = SPEND_CATEGORY_MERGES.map(([from, to]) => {
+    const old = `(SELECT id FROM categories WHERE name = ${q(from)} AND kind = 'expense')`;
+    return [
+      `INSERT OR IGNORE INTO category_aliases (name, category_id) SELECT ${q(from)}, ${id(to)} WHERE ${old} IS NOT NULL;`,
+      `UPDATE category_aliases SET category_id = ${id(to)} WHERE category_id = ${old};`,
+      `UPDATE transactions SET category_id = ${id(to)} WHERE category_id = ${old};`,
+      `UPDATE merchant_categories SET category_id = ${id(to)} WHERE category_id = ${old};`,
+      `UPDATE categories SET parent_id = ${id(to)} WHERE parent_id = ${old};`,
+      `DELETE FROM categories WHERE id = ${old};`,
+    ].join('\n');
+  });
+  return [...add, ...merges].join('\n');
+}
+
 /** Steps after the baseline, applied in order to a database that has the baseline and a prefix of these. */
 const STEPS: { version: number; name: string; sql: string }[] = [
   { version: 101, name: 'holdings.cost_basis', sql: `ALTER TABLE holdings ADD COLUMN cost_basis REAL` },
@@ -197,6 +246,7 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     -- COALESCE(source, company)
     ALTER TABLE accounts ADD COLUMN source TEXT;
   ` },
+  { version: 110, name: 'spend categories', sql: spendCategoriesSql() },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 
