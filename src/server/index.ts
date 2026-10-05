@@ -11,6 +11,7 @@ import { RANGES, expenses, history, rangeStart, summary, type Range } from '../a
 import { priceChangeSince } from '../analytics/quotes.js';
 import { cashFlow, cashFlowRows } from '../analytics/cashflow.js';
 import { expenseBreakdown, expenseRowsIn } from '../analytics/expenses.js';
+import { NATURES, type Nature } from '../analytics/nature.js';
 import { funds } from '../analytics/funds.js';
 import { configuredSources, integrations } from '../analytics/integrations.js';
 import { configOwners } from '../analytics/owners.js';
@@ -96,22 +97,27 @@ app.get('/api/expenses', async req => {
 
 // one month's spend rows (month=YYYY-MM) or the range's (range=), optionally of one source (a card account id, or bank),
 // merchant or top-level category
+const natureOf = (v: unknown): Nature | undefined => {
+  if (!v) return undefined;
+  if (!NATURES.includes(v as Nature)) throw badRequest(`nature must be ${NATURES.join(', ')}`);
+  return v as Nature;
+};
 app.get('/api/expenses/rows', async req => {
   const q = req.query as Record<string, string>;
   if (q.month && !/^\d{4}-\d{2}$/.test(q.month)) throw badRequest('month must be YYYY-MM');
   if (!q.month && !q.range) throw badRequest('month or range is required');
-  const filter = { merchant: q.merchant || undefined, category: q.category || undefined };
+  const filter = { merchant: q.merchant || undefined, category: q.category || undefined, nature: natureOf(q.nature) };
   return expenseRowsIn(db, { ...filter, month: q.month || undefined, source: q.source || undefined,
     from: q.month ? undefined : expenseBreakdown(db, rangeOf(q.range)).from });
 });
 
 // spend by source: each card account (the month's spend, the month before, next charge, installments left) and the bank
-// accounts; the range's monthly totals; the month's (month=YYYY-MM, default this month) categories and merchants; of one
+// accounts; the range's monthly totals (and per nature); the month's natures and monthly commitments; the month's (month=YYYY-MM, default this month) categories and merchants; of one
 // source when given
 app.get('/api/expenses/breakdown', async req => {
   const q = req.query as Record<string, string>;
   if (q.month && !/^\d{4}-\d{2}$/.test(q.month)) throw badRequest('month must be YYYY-MM');
-  return expenseBreakdown(db, rangeOf(q.range), q.source || undefined, q.month || undefined);
+  return expenseBreakdown(db, rangeOf(q.range), q.source || undefined, q.month || undefined, undefined, natureOf(q.nature));
 });
 
 // each fund (pension, study, provident, mutual) with its growth over the range and the returns its reports state

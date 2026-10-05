@@ -23,3 +23,11 @@ export const sourceColor = (source: string | null | undefined) => {
   const id = source.split(':')[0];
   return SOURCE_COLORS[id] ?? SOURCE_OTHER;
 };
+
+/** Spend natures: muted tints of the palette, so the stacked bars stay quiet. */
+export const NATURE_COLORS: Record<'monthly' | 'everyday' | 'one_off', string> = {
+  monthly: 'color-mix(in srgb, var(--c1) 78%, white)',
+  everyday: 'color-mix(in srgb, var(--c6) 70%, white)',
+  one_off: 'color-mix(in srgb, var(--c3) 80%, white)',
+};
+export const NATURE_LABELS: Record<'monthly' | 'everyday' | 'one_off', string> = { monthly: 'Monthly', everyday: 'Everyday', one_off: 'One-off' };

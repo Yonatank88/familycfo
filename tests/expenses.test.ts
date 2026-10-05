@@ -3,6 +3,7 @@ import { expenseRowsOf, expenses } from '../src/analytics/summary.js';
 import { cleanMerchantName } from '../src/util.js';
 import { expenseBreakdown, expenseRowsIn, nextCharge, remainingInstallments } from '../src/analytics/expenses.js';
 import { addAccount, addTx, testDb } from './helpers.js';
+import { computeNatures } from '../src/analytics/nature.js';
 
 describe('expenses', () => {
   const db = testDb();
@@ -135,7 +136,7 @@ describe('expenses by card', () => {
     expect(b.months.slice(0, 3)).toEqual(['2026-05', '2026-04', '2026-03']);
     expect(b.sources.map(s => [s.key, s.spent])).toEqual([['isracard:1', 100], ['max:2', 0], ['bank', 0]]);
     expect(b.monthTotal).toBe(100);
-    expect(b.categories).toEqual([{ key: String(food), name: 'Food', total: 100, count: 1, share: 100, previous: 0 }]);
+    expect(b.categories).toEqual([{ key: String(food), name: 'Food', total: 100, count: 1, share: 100, previous: 0, nature: 'everyday' }]);
     const may = expenseBreakdown(db, '1Y', undefined, '2026-05', '2026-05-15');
     expect(may.categories.find(c => c.key === String(food))).toMatchObject({ total: 40, previous: 100 });
     expect(may.categories.reduce((s, c) => s + c.share, 0)).toBeCloseTo(100, 0);
@@ -143,5 +144,25 @@ describe('expenses by card', () => {
     expect(expenseBreakdown(db, '1Y', undefined, '2026-09', '2026-05-15').month).toBe('2026-05');
     db.prepare(`UPDATE transactions SET category_id = NULL`).run();
     db.prepare(`DELETE FROM categories`).run();
+  });
+  it('the month\'s natures (share, the month before), nature bars, a nature filter on categories, merchants and rows, and the monthly commitments', () => {
+    computeNatures(db, '2026-05-15');
+    const b = expenseBreakdown(db, '1Y', undefined, '2026-05', '2026-05-15');
+    // May: IKEA installment 300 → monthly; cafe 40 + books 20 + electric 250 → everyday (no history, below one-off)
+    expect(b.natures).toEqual([
+      { nature: 'monthly', total: 300, share: 49.18, previous: 0 },
+      { nature: 'everyday', total: 310, share: 50.82, previous: 100 },
+      { nature: 'one_off', total: 0, share: 0, previous: 0 },
+    ]);
+    expect(b.bars.find(m => m.month === '2026-05')).toEqual({ month: '2026-05', total: 610, monthly: 300, everyday: 310, one_off: 0 });
+    const monthly = expenseBreakdown(db, '1Y', undefined, '2026-05', '2026-05-15', 'monthly');
+    expect(monthly.nature).toBe('monthly');
+    expect(monthly.merchants.map(m => m.name)).toEqual(['IKEA']);
+    expect(monthly.categories).toEqual([expect.objectContaining({ key: 'none', total: 300, share: 100, nature: 'monthly' })]);
+    expect(monthly.monthTotal).toBe(610);
+    expect(expenseRowsIn(db, { month: '2026-05', nature: 'monthly' }, '2026-05-15').map(r => r.merchant)).toEqual(['IKEA']);
+    expect(b.commitments).toEqual([{ key: 'ikea', name: 'IKEA', category: 'Uncategorized', typical: 300, lastDate: '2026-05-02' }]);
+    // of one source
+    expect(expenseBreakdown(db, '1Y', 'isracard:1', '2026-05', '2026-05-15').commitments).toEqual([]);
   });
 });

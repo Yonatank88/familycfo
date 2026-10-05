@@ -2,16 +2,75 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, Cell, XAxis } from 'recharts';
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
-import { api, type ExpenseCategory, type ExpenseFilter, type ExpenseSource, type Range } from './api';
+import { api, type Commitment, type ExpenseCategory, type ExpenseFilter, type ExpenseSource, type Nature, type NatureSplit, type Range } from './api';
 import { compact, money, monthLong, monthShort, shortDay, type Currency } from './format';
-import { OTHER, PALETTE, SOURCE_OTHER, sourceColor } from './colors';
+import { NATURE_COLORS, NATURE_LABELS, OTHER, PALETTE, SOURCE_OTHER, sourceColor } from './colors';
 import { BarList, Card, Dot, Name, SidePanel } from './ui';
 import { cn } from '@/lib/utils';
 
 /** A card's source colour; spend paid from the bank accounts is neutral. */
 const colorOf = (s: ExpenseSource) => (s.kind === 'card' ? sourceColor(s.key) : SOURCE_OTHER);
 
-const spendConfig = { total: { label: 'Spent' } } satisfies ChartConfig;
+const NATURE_ORDER: Nature[] = ['monthly', 'everyday', 'one_off'];
+const spendConfig = Object.fromEntries(NATURE_ORDER.map(n => [n, { label: NATURE_LABELS[n], color: NATURE_COLORS[n] }])) satisfies ChartConfig;
+
+/** A change from the month before: ▲ / ▼ and the amount, red when spend went up. */
+function Delta({ diff, delta, className }: { diff: number; delta: (n: number) => string; className?: string }) {
+  return (
+    <span className={cn('tabular-nums', Math.abs(diff) < 1 ? 'text-faint' : diff > 0 ? 'text-down' : 'text-up', className)}>
+      {Math.abs(diff) < 1 ? '–' : `${diff > 0 ? '▲' : '▼'} ${delta(Math.abs(diff))}`}
+    </span>
+  );
+}
+
+/** A nature's small neutral tag, its colour as a dot. */
+function NatureTag({ nature }: { nature: Nature }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded bg-ink/[0.05] px-1.5 py-px text-[10.5px] font-medium text-muted max-sm:bg-transparent max-sm:px-0">
+      <Dot color={NATURE_COLORS[nature]} className="h-1.5 w-1.5" /><span className="max-sm:sr-only">{NATURE_LABELS[nature]}</span>
+    </span>
+  );
+}
+
+/** The month's three natures: amount, share and the change from the month before; one can be picked as a filter. */
+function NatureTiles({ items, active, onPick, fmt, delta }: {
+  items: NatureSplit[]; active: Nature | null; onPick: (n: Nature) => void; fmt: (n: number) => string; delta: (n: number) => string;
+}) {
+  return (
+    <div className="mt-4 grid grid-cols-3 gap-2 border-t border-line pt-4 sm:gap-3">
+      {items.map(n => (
+        <button key={n.nature} type="button" onClick={() => onPick(n.nature)} aria-pressed={active === n.nature}
+          className={cn('flex min-w-0 flex-col rounded-xl border px-3 py-2.5 text-left hover:bg-paper/60 sm:px-4',
+            active === n.nature ? 'border-accent' : 'border-line')}>
+          <span className="flex items-center gap-1.5 text-xs font-medium text-ink"><Dot color={NATURE_COLORS[n.nature]} />{NATURE_LABELS[n.nature]}</span>
+          <span className="mt-1 truncate text-base font-semibold tabular-nums text-ink sm:text-lg">{fmt(n.total)}</span>
+          <span className="flex flex-wrap items-baseline gap-x-2 text-xs">
+            <span className="tabular-nums text-muted">{Math.round(n.share)}%</span>
+            <Delta diff={n.total - n.previous} delta={delta} />
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The recurring merchants: their typical month and when they last charged. */
+function Commitments({ items, fmt, onSelect }: { items: Commitment[]; fmt: (n: number) => string; onSelect: (c: Commitment) => void }) {
+  return (
+    <ul className="grid grid-cols-1 gap-x-8 text-sm lg:grid-cols-2">
+      {items.map(c => (
+        <li key={c.key} className="min-w-0">
+          <button type="button" onClick={() => onSelect(c)}
+            className="-mx-2 flex min-h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-paper">
+            <span className="min-w-0 flex-1 truncate text-ink"><bdi dir="auto">{c.name}</bdi></span>
+            <span className="shrink-0 text-xs tabular-nums text-faint">{shortDay(c.lastDate)}</span>
+            <span className="w-20 shrink-0 text-right tabular-nums text-ink">{fmt(c.typical)}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /** One source: the month's spend, the month before's, and for a card its next charge and the installments left. */
 function SourceCard({ s, prev, active, onClick, fmt }: { s: ExpenseSource; prev: string; active: boolean; onClick: () => void; fmt: (n: number) => string }) {
@@ -97,8 +156,8 @@ function RowsPanel({ filter, kicker, title, onClose, fmt, byMerchant = false }: 
 }
 
 /** Every category of the month: amount, share of the month, a thin bar, and the change from the month before. */
-function CategoryList({ items, format, delta, onSelect }: {
-  items: ExpenseCategory[]; format: (n: number) => string; delta: (n: number) => string; onSelect: (c: ExpenseCategory) => void;
+function CategoryList({ items, format, delta, onSelect, tags }: {
+  items: ExpenseCategory[]; format: (n: number) => string; delta: (n: number) => string; onSelect: (c: ExpenseCategory) => void; tags: boolean;
 }) {
   const top = items[0]?.total || 1;
   return (
@@ -109,14 +168,15 @@ function CategoryList({ items, format, delta, onSelect }: {
           <li key={c.key}>
             <button type="button" onClick={() => onSelect(c)}
               className="-mx-2 flex min-h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-paper">
-              <span className="min-w-0 flex-1 truncate text-ink"><bdi dir="auto">{c.name}</bdi></span>
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="min-w-0 truncate text-ink"><bdi dir="auto">{c.name}</bdi></span>
+                {tags && <NatureTag nature={c.nature} />}
+              </span>
               <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-line max-sm:hidden lg:w-20 xl:w-24">
                 <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (c.total / top) * 100)}%`, background: c.key === 'none' ? OTHER : PALETTE[i % PALETTE.length] }} />
               </span>
               <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted">{Math.round(c.share)}%</span>
-              <span className={cn('w-16 shrink-0 text-right text-xs tabular-nums', Math.abs(diff) < 1 ? 'text-faint' : diff > 0 ? 'text-down' : 'text-up')}>
-                {Math.abs(diff) < 1 ? '–' : `${diff > 0 ? '▲' : '▼'} ${delta(Math.abs(diff))}`}
-              </span>
+              <Delta diff={diff} delta={delta} className="w-16 shrink-0 text-right text-xs" />
               <span className="w-20 shrink-0 text-right tabular-nums text-ink">{format(c.total)}</span>
             </button>
           </li>
@@ -142,6 +202,7 @@ export default function Expenses({ range, setRange, currency, convert }: {
   range: Range; setRange: (r: Range) => void; currency: Currency; convert: (n: number) => number;
 }) {
   const [source, setSource] = useState<string | null>(null);
+  const [nature, setNature] = useState<Nature | null>(null);
   const [month, setMonthState] = useState<string | null>(monthFromUrl);
   const [panel, setPanel] = useState<Panel | null>(null);
   useEffect(() => {
@@ -154,18 +215,18 @@ export default function Expenses({ range, setRange, currency, convert }: {
     window.history.replaceState(null, '', `${window.location.pathname}?month=${m}`);
   };
   const { data } = useQuery({
-    queryKey: ['expense-breakdown', month, source],
+    queryKey: ['expense-breakdown', month, source, nature],
     // the bars always cover the last 12 months; the month is picked by clicking one
-    queryFn: () => api.expenseBreakdown('1Y', month, source ?? undefined), placeholderData: p => p,
+    queryFn: () => api.expenseBreakdown('1Y', month, source ?? undefined, nature ?? undefined), placeholderData: p => p,
   });
   if (!data) return null;
   const fmt = (n: number) => money(convert(n), currency);
   const delta = (n: number) => (convert(n) < 1000 ? fmt(n) : compact(convert(n), currency));
   const sourceLabel = data.sources.find(s => s.key === source)?.label ?? 'All';
   const selected = data.month;
-  const base: ExpenseFilter = { ...(source ? { source } : {}), month: selected };
-  const kicker = `${sourceLabel} · ${monthLong(selected)}`;
-  const chart = data.bars.map(m => ({ month: m.month, total: convert(m.total) }));
+  const base: ExpenseFilter = { ...(source ? { source } : {}), ...(nature ? { nature } : {}), month: selected };
+  const kicker = [sourceLabel, nature && NATURE_LABELS[nature], monthLong(selected)].filter(Boolean).join(' · ');
+  const chart = data.bars.map(m => ({ month: m.month, total: convert(m.total), monthly: convert(m.monthly), everyday: convert(m.everyday), one_off: convert(m.one_off) }));
 
   return (
     <div className="space-y-5">
@@ -178,17 +239,29 @@ export default function Expenses({ range, setRange, currency, convert }: {
             }}>
             <XAxis dataKey="month" tickFormatter={monthShort} tickLine={false} axisLine={false} fontSize={11} tick={{ fill: 'var(--color-faint)' }} minTickGap={6} />
             <ChartTooltip cursor={{ fill: 'rgba(22,33,62,0.04)' }}
-              content={({ active, payload, label }) => active && payload?.length ? (
-                <div className="rounded-xl border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg">
-                  <div className="text-muted">{monthLong(String(label))}</div>
-                  <div className="mt-0.5 tabular-nums text-ink">{money(Number(payload[0].value), currency)}</div>
-                </div>
-              ) : null} />
-            <Bar dataKey="total" radius={[5, 5, 5, 5]} maxBarSize={28} className="cursor-pointer" isAnimationActive={false}>
-              {chart.map(m => <Cell key={m.month} fill={m.month === selected ? 'var(--color-accent)' : '#dfe4ee'} />)}
-            </Bar>
+              content={({ active, payload, label }) => {
+                const p = active && payload?.length ? (payload[0].payload as (typeof chart)[number]) : null;
+                return p ? (
+                  <div className="min-w-36 rounded-xl border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg">
+                    <div className="flex justify-between gap-3"><span className="text-muted">{monthLong(String(label))}</span><span className="tabular-nums text-ink">{money(p.total, currency)}</span></div>
+                    {[...NATURE_ORDER].reverse().map(n => (
+                      <div key={n} className="mt-0.5 flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-1.5 text-muted"><Dot color={NATURE_COLORS[n]} />{NATURE_LABELS[n]}</span>
+                        <span className="tabular-nums text-ink">{money(p[n], currency)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              }} />
+            {NATURE_ORDER.map((n, i) => (
+              <Bar key={n} dataKey={n} stackId="spend" maxBarSize={28} className="cursor-pointer" isAnimationActive={false}
+                radius={i === NATURE_ORDER.length - 1 ? [4, 4, 0, 0] : i === 0 ? [0, 0, 4, 4] : 0}>
+                {chart.map(m => <Cell key={m.month} fill={NATURE_COLORS[n]} fillOpacity={m.month === selected ? 1 : nature && nature !== n ? 0.12 : 0.4} />)}
+              </Bar>
+            ))}
           </BarChart>
         </ChartContainer>
+        <NatureTiles items={data.natures} active={nature} onPick={n => setNature(nature === n ? null : n)} fmt={fmt} delta={delta} />
       </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -200,7 +273,7 @@ export default function Expenses({ range, setRange, currency, convert }: {
       <div className="grid gap-5 lg:grid-cols-2">
         <Card title="Categories">
           {data.categories.length
-            ? <CategoryList items={data.categories} format={fmt} delta={delta}
+            ? <CategoryList items={data.categories} format={fmt} delta={delta} tags={!nature}
               onSelect={c => setPanel({ filter: { ...base, category: c.key }, kicker, title: c.name, byMerchant: true })} />
             : <p className="text-sm text-faint">None</p>}
         </Card>
@@ -211,6 +284,13 @@ export default function Expenses({ range, setRange, currency, convert }: {
             : <p className="text-sm text-faint">None</p>}
         </Card>
       </div>
+
+      {data.commitments.length > 0 && (
+        <Card title="Monthly commitments" action={<span className="text-sm font-semibold tabular-nums text-ink">{fmt(data.commitments.reduce((a, c) => a + c.typical, 0))}</span>}>
+          <Commitments items={data.commitments} fmt={fmt}
+            onSelect={c => setPanel({ filter: { ...(source ? { source } : {}), range: '1Y', merchant: c.key }, kicker: `${sourceLabel} · Last 12 months`, title: c.name })} />
+        </Card>
+      )}
 
       {panel && <RowsPanel {...panel} fmt={fmt} onClose={() => setPanel(null)} />}
     </div>

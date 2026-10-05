@@ -3,6 +3,7 @@ import { localDate } from '../ingest/normalize.js';
 import { cleanMerchantName, merchantKey, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
 import { byCategory, expenseRows, rangeStart, type ExpenseRow, type Range } from './summary.js';
+import { NATURES, type Nature } from './nature.js';
 
 /**
  * `/api/expenses/breakdown`: spending by where it was paid from — one source per credit-card account, and "bank" for
@@ -90,11 +91,55 @@ function topMerchants(rows: ExpenseRow[], limit = 8) {
   }));
 }
 
+/** Each nature's share of some rows, by amount. */
+function natureTotals(rows: ExpenseRow[]): Record<Nature, number> {
+  const out = { monthly: 0, everyday: 0, one_off: 0 } as Record<Nature, number>;
+  for (const r of rows) out[r.nature] += r.amount;
+  for (const n of NATURES) out[n] = round(out[n]);
+  return out;
+}
+
+/** The nature most of a category's spend has. */
+const dominant = (rows: ExpenseRow[]): Nature => {
+  const t = natureTotals(rows);
+  return NATURES.reduce((a, b) => (t[b] > t[a] ? b : a));
+};
+
+/**
+ * The monthly commitments as of a month: every merchant with a monthly charge in it or the two months before (not an
+ * installment plan already paid off), its
+ * typical month (median of its monthly charges per month, over the six months up to it) and its last charge.
+ */
+export const COMMITMENT_RECENT_MONTHS = 3;
+export const COMMITMENT_TYPICAL_MONTHS = 6;
+function commitments(rows: ExpenseRow[], month: string) {
+  let recentFrom = month, typicalFrom = month;
+  for (let i = 1; i < COMMITMENT_RECENT_MONTHS; i++) recentFrom = prevMonth(recentFrom);
+  for (let i = 1; i < COMMITMENT_TYPICAL_MONTHS; i++) typicalFrom = prevMonth(typicalFrom);
+  const by = new Map<string, ExpenseRow[]>();
+  for (const r of rows) if (r.nature === 'monthly' && r.month >= typicalFrom && r.month <= month) by.set(r.merchant, [...(by.get(r.merchant) ?? []), r]);
+  const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); const h = s.length >> 1; return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; };
+  return [...by].flatMap(([key, list]) => {
+    if (!list.some(r => r.month >= recentFrom)) return [];
+    // an installment plan whose last payment is behind it is no longer a commitment
+    const latest = [...list].sort((a, b) => a.date.localeCompare(b.date)).at(-1)!;
+    if (latest.installment && latest.installment[0] >= latest.installment[1]) return [];
+    const perMonth = new Map<string, number>();
+    for (const r of list) perMonth.set(r.month, (perMonth.get(r.month) ?? 0) + r.amount);
+    const typical = round(median([...perMonth.values()]));
+    if (typical <= 0) return [];
+    const last = list.filter(r => r.amount > 0).map(r => r.date).sort().at(-1) ?? list.map(r => r.date).sort().at(-1)!;
+    const names = new Map<string, number>();
+    for (const r of list) names.set(r.description, (names.get(r.description) ?? 0) + 1);
+    return [{ key, name: cleanMerchantName([...names].sort((a, b) => b[1] - a[1])[0][0]), category: list.at(-1)!.category.name, typical, lastDate: last }];
+  }).sort((a, b) => b.typical - a.typical);
+}
+
 /**
  * The range's monthly totals (the overview), and one month (`month`, default this month): each source's spend in it and
  * the month before, every category of it (share of the month, the previous month's total), its top merchants.
  */
-export function expenseBreakdown(db: DB, range: Range, source?: string, month?: string, asOf = today()) {
+export function expenseBreakdown(db: DB, range: Range, source?: string, month?: string, asOf = today(), nature?: Nature) {
   const all = expenseRows(db, asOf);
   const current = asOf.slice(0, 7);
   const selected = month && month <= current ? month : current;
@@ -124,33 +169,46 @@ export function expenseBreakdown(db: DB, range: Range, source?: string, month?: 
 
   const mine = source ? of(source) : all;
   const rows = mine.filter(r => r.month >= from);
-  const inMonth = mine.filter(r => r.month === selected);
-  const monthTotal = sum(inMonth);
-  const prevBy = new Map(byCategory(mine.filter(r => r.month === previous), Infinity).map(c => [c.key, c.total]));
+  const monthRows = mine.filter(r => r.month === selected);
+  const monthTotal = sum(monthRows);
+  const now = natureTotals(monthRows), before = natureTotals(mine.filter(r => r.month === previous));
+  // the categories and merchants: of one nature when given
+  const picked = nature ? mine.filter(r => r.nature === nature) : mine;
+  const inMonth = picked.filter(r => r.month === selected);
+  const pickedTotal = sum(inMonth);
+  const prevBy = new Map(byCategory(picked.filter(r => r.month === previous), Infinity).map(c => [c.key, c.total]));
   return {
     range, from, currentMonth: current, month: selected, source: source ?? null,
     // every month with spend, newest first, and this month even without any
     months: [...new Set([current, ...all.map(r => r.month)])].sort().reverse(),
     sources,
     total: sum(rows),
-    bars: monthsBetween(from, current).map(m => ({ month: m, total: sum(rows.filter(r => r.month === m)) })),
+    bars: monthsBetween(from, current).map(m => {
+      const list = rows.filter(r => r.month === m);
+      return { month: m, total: sum(list), ...natureTotals(list) };
+    }),
     monthTotal,
+    nature: nature ?? null,
+    natures: NATURES.map(n => ({ nature: n, total: now[n], share: monthTotal > 0 ? round((now[n] / monthTotal) * 100) : 0, previous: before[n] })),
     categories: byCategory(inMonth, Infinity).map(c => ({
-      ...c, share: monthTotal > 0 ? round((c.total / monthTotal) * 100) : 0, previous: prevBy.get(c.key) ?? 0,
+      ...c, share: pickedTotal > 0 ? round((c.total / pickedTotal) * 100) : 0, previous: prevBy.get(c.key) ?? 0,
+      nature: dominant(inMonth.filter(r => r.category.key === c.key)),
     })),
     merchants: topMerchants(inMonth),
+    commitments: commitments(mine, selected),
   };
 }
 
 /** `/api/expenses/rows` with a source and/or a range: the matching spend rows, newest first. */
-export function expenseRowsIn(db: DB, filter: { month?: string; from?: string; source?: string; merchant?: string; category?: string }, asOf = today()) {
+export function expenseRowsIn(db: DB, filter: { month?: string; from?: string; source?: string; merchant?: string; category?: string; nature?: Nature }, asOf = today()) {
   return expenseRows(db, asOf)
     .filter(r => (!filter.month || r.month === filter.month) && (!filter.from || r.month >= filter.from)
       && (!filter.source || sourceOf(r) === filter.source)
-      && (!filter.merchant || r.merchant === filter.merchant) && (!filter.category || r.category.key === filter.category))
+      && (!filter.merchant || r.merchant === filter.merchant) && (!filter.category || r.category.key === filter.category)
+      && (!filter.nature || r.nature === filter.nature))
     .sort((a, b) => b.date.localeCompare(a.date) || b.amount - a.amount)
     .map(r => ({
       id: r.id, date: r.date, description: r.description, merchant: cleanMerchantName(r.description), merchantKey: r.merchant, account: r.account,
-      source: sourceOf(r), company: r.company, category: r.category.key === 'none' ? null : r.category.name, amount: r.amount, installment: r.installment,
+      source: sourceOf(r), company: r.company, category: r.category.key === 'none' ? null : r.category.name, nature: r.nature, amount: r.amount, installment: r.installment,
     }));
 }

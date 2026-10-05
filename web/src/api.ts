@@ -56,8 +56,11 @@ export interface ExpenseMonth { month: string; total: number; categories: Ranked
 export interface Expenses { currentMonth: string; months: ExpenseMonth[] }
 export interface ExpenseRow {
   id: number; date: string; description: string; merchant: string; merchantKey: string; account: string; source: string; company: string;
-  category: string | null; amount: number; installment: [number, number] | null;
+  category: string | null; nature: Nature; amount: number; installment: [number, number] | null;
 }
+export type Nature = 'monthly' | 'everyday' | 'one_off';
+export interface NatureSplit { nature: Nature; total: number; share: number; previous: number }
+export interface Commitment { key: string; name: string; category: string; typical: number; lastDate: string }
 /** a card account (key = account id) or the bank accounts (key = 'bank') */
 export interface ExpenseSource {
   /** spent = the selected month, previous = the month before it */
@@ -65,16 +68,18 @@ export interface ExpenseSource {
   nextCharge: { date: string; amount: number } | null;
   installments: { payments: number; plans: number; amount: number } | null;
 }
-export interface ExpenseCategory extends Ranked { share: number; previous: number }
+export interface ExpenseCategory extends Ranked { share: number; previous: number; nature: Nature }
 export interface ExpenseBreakdown {
   range: Range; from: string; currentMonth: string; month: string; source: string | null;
   /** months with spend, newest first */
   months: string[]; sources: ExpenseSource[];
   /** the range's total and monthly bars */
-  total: number; bars: { month: string; total: number }[];
-  monthTotal: number; categories: ExpenseCategory[]; merchants: Ranked[];
+  total: number; bars: ({ month: string; total: number } & Record<Nature, number>)[];
+  /** the month's whole total; categories and merchants are of `nature` when set */
+  monthTotal: number; nature: Nature | null; natures: NatureSplit[]; categories: ExpenseCategory[]; merchants: Ranked[];
+  commitments: Commitment[];
 }
-export interface ExpenseFilter { month?: string; range?: Range; source?: string; merchant?: string; category?: string }
+export interface ExpenseFilter { month?: string; range?: Range; source?: string; merchant?: string; category?: string; nature?: Nature }
 export interface Fund {
   source: string; name: string; provider: string | null; owner: string | null; subType: string | null; currency: string;
   value: number | null; valueIls: number | null; asOf: string | null; liquidityDate: string | null;
@@ -179,8 +184,8 @@ export const api = {
   summary: (range: Range) => request<Summary>(`/api/summary?range=${range}`),
   history: (range: Range, group: Group) => request<History>(`/api/history?range=${range}&group=${group}`),
   expenses: () => request<Expenses>('/api/expenses?months=12'),
-  expenseBreakdown: (range: Range, month: string | null, source?: string) =>
-    request<ExpenseBreakdown>(`/api/expenses/breakdown?range=${range}${month ? `&month=${month}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}`),
+  expenseBreakdown: (range: Range, month: string | null, source?: string, nature?: Nature) =>
+    request<ExpenseBreakdown>(`/api/expenses/breakdown?range=${range}${month ? `&month=${month}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}${nature ? `&nature=${nature}` : ''}`),
   expenseRows: (filter: ExpenseFilter) =>
     request<ExpenseRow[]>(`/api/expenses/rows?${new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][])}`),
   funds: (range: Range) => request<Funds>(`/api/funds?range=${range}`),
