@@ -108,6 +108,13 @@ function spendCategoriesSql(): string {
   return [...add, ...merges].join('\n');
 }
 
+/**
+ * Scraper category names that span more than one spend category (Cal's "home" holds the electricity bill and furniture,
+ * "communications & computers" the phone bill and laptops): not aliases, the AI decides their merchants (with the name
+ * as a hint), and they are never learned as aliases.
+ */
+export const AMBIGUOUS_SCRAPER_CATEGORIES = ['תקשורת ומחשבים', 'חשמל ומחשבים', 'ריהוט ובית', 'מלונאות ואירוח', 'תיירות'];
+
 /** Steps after the baseline, applied in order to a database that has the baseline and a prefix of these. */
 const STEPS: { version: number; name: string; sql: string }[] = [
   { version: 101, name: 'holdings.cost_basis', sql: `ALTER TABLE holdings ADD COLUMN cost_basis REAL` },
@@ -247,6 +254,15 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     ALTER TABLE accounts ADD COLUMN source TEXT;
   ` },
   { version: 110, name: 'spend categories', sql: spendCategoriesSql() },
+  { version: 111, name: 'transactions.nature', sql: `
+    -- a spend row's nature, recomputed by the pipeline (src/analytics/nature.ts): monthly | everyday | one_off
+    ALTER TABLE transactions ADD COLUMN nature TEXT CHECK (nature IN ('monthly', 'everyday', 'one_off'));
+  ` },
+  { version: 112, name: 'ambiguous scraper categories', sql: (() => {
+    const names = AMBIGUOUS_SCRAPER_CATEGORIES.map(n => `'${n}'`).join(', ');
+    return `DELETE FROM category_aliases WHERE name IN (${names});
+      UPDATE transactions SET category_id = NULL, category_source = NULL WHERE category_source = 'scraper' AND source_category IN (${names});`;
+  })() },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 
@@ -455,8 +471,8 @@ const SCRAPER_CATEGORY_ALIASES: Record<string, string> = {
   'מזון מהיר': 'אוכל מהיר', 'אופנה': 'אופנה ביגוד והנעלה', 'רפואה ובתי מרקחת': 'פארם', 'רפואה ובריאות': 'בריאות',
   'שירותי תקשורת': 'סלולר', 'ביטוח': 'ביטוחים', 'דלק, חשמל וגז': 'דלק וחשמל', 'אנרגיה': 'דלק וחשמל',
   'תחבורה ורכבים': 'רכב ותחבורה', 'חיות מחמד': 'בעלי חיים', 'קוסמטיקה וטיפוח': 'קוסמטיקה ואביזרי טיפוח',
-  'מלונאות ואירוח': 'מלונות', 'טיסות ותיירות': 'טיסות', 'תיירות': 'נופש', 'תקשורת ומחשבים': 'חשמל ואלקטרוניקה',
-  'חשמל ומחשבים': 'חשמל ואלקטרוניקה', 'ריהוט ובית': 'ריהוט', 'עיצוב הבית': 'שיפוץ ואביזרים לבית', 'ספרים ודפוס': 'תרבות ופנאי',
+  'טיסות ותיירות': 'טיסות',
+  'עיצוב הבית': 'שיפוץ ואביזרים לבית', 'ספרים ודפוס': 'תרבות ופנאי',
   'אירועים': 'מתנות ואירועים', 'ילדים': 'חינוך ומשפחה', 'פנאי, בידור וספורט': 'תרבות ופנאי', 'פנאי בילוי': 'מסעדות ובילויים',
 };
 

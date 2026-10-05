@@ -157,7 +157,7 @@ describe('categories in English (step 107) and the spend categories (step 110)',
     const path = `${process.env.TMPDIR ?? '/tmp'}/familycfo-107-${process.pid}.db`;
     openDb(path).close();
     const raw = new Database(path);
-    raw.exec(`DELETE FROM schema_version WHERE version >= 107; DROP TABLE account_balance_daily; ALTER TABLE accounts DROP COLUMN source;
+    raw.exec(`DELETE FROM schema_version WHERE version >= 107; DROP TABLE account_balance_daily; ALTER TABLE accounts DROP COLUMN source; ALTER TABLE transactions DROP COLUMN nature;
       DELETE FROM categories WHERE name IN (${SPEND_CATEGORIES.map(n => `'${n}'`).join(', ')}) AND name NOT IN ('Bills', 'Health', 'Other');
       DELETE FROM category_aliases;
       INSERT INTO categories (name, parent_id, kind) VALUES ('מזון וטואלטיקה', NULL, 'expense');

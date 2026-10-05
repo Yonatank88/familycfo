@@ -6,6 +6,7 @@ import { localDate } from './ingest/normalize.js';
 import { matchCurrencyExchanges, matchImmediateCardDebits, matchInternalTransfers, reconcileCardBills } from './ingest/transfers.js';
 import { backfillRates, refreshBoiRates } from './analytics/fx.js';
 import { refreshQuotes } from './analytics/quotes.js';
+import { computeNatures } from './analytics/nature.js';
 import { seedAccountBalances, writeSnapshots, type SourceOutcome } from './analytics/snapshots.js';
 import { addDays, today } from './util.js';
 
@@ -26,7 +27,7 @@ function ratesFrom(db: DB): string {
 
 /**
  * Everything that runs after a scrape, in order: FX → quotes → categorize → kinds → card bills → immediate card
- * debits → own-account transfers → currency exchanges between own accounts → merchant categories (AI; once kinds are final, it only reads spend rows) → snapshots.
+ * debits → own-account transfers → currency exchanges between own accounts → merchant categories (AI; once kinds are final, it only reads spend rows) → natures → snapshots.
  */
 export async function runPipeline(db: DB = getDb(), opts: PipelineOptions = {}): Promise<Record<string, number>> {
   if (opts.fetchRates !== false) {
@@ -52,10 +53,11 @@ export async function runPipeline(db: DB = getDb(), opts: PipelineOptions = {}):
       merchantRows = ai.rows + ai.ruleRows;
     } catch (err) { console.warn('  merchants not categorised:', (err as Error).message); }
   }
+  const natures = computeNatures(db);
   const snapshots = writeSnapshots(db, opts.sources ?? []);
   const accountDays = seedAccountBalances(db);
   return {
-    categorized, merchantRows, cardBillsKept: cardBills.kept, cardBillsDemoted: cardBills.demoted, cardRowsCovered: cardBills.covered, immediateDebits: debits.matched, transfers, fxExchanges,
+    categorized, merchantRows, monthly: natures.monthly, everyday: natures.everyday, oneOff: natures.one_off, cardBillsKept: cardBills.kept, cardBillsDemoted: cardBills.demoted, cardRowsCovered: cardBills.covered, immediateDebits: debits.matched, transfers, fxExchanges,
     snapshots: snapshots.written, bankDaysBackfilled: snapshots.backfilled, accountDaysSeeded: accountDays, fxFlagged: snapshots.flagged.length,
   };
 }

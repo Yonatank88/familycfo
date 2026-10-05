@@ -272,6 +272,8 @@ export function summary(db: DB, asOf = today(), owners: Map<string, string> = ne
 export interface ExpenseRow {
   id: number; date: string; month: string; description: string; merchant: string; account: string; amount: number; category: TopCategory;
   accountId: string; accountKind: 'bank' | 'card'; company: string;
+  /** monthly | everyday | one_off (transactions.nature; everyday until the pipeline has run) */
+  nature: 'monthly' | 'everyday' | 'one_off';
   /** [n, N] for an installment payment */
   installment: [number, number] | null;
 }
@@ -311,10 +313,10 @@ export function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
   const rows = db.prepare(`
     SELECT t.id, t.date, t.processed_date, t.description, t.charged_amount, COALESCE(t.charged_currency, 'ILS') AS currency,
       t.kind, t.txn_type, t.installment_number, t.installment_total, t.category_id, COALESCE(a.display_name, a.id) AS account,
-      a.id AS account_id, a.kind AS account_kind, a.company
+      a.id AS account_id, a.kind AS account_kind, a.company, COALESCE(t.nature, 'everyday') AS nature
     FROM transactions t JOIN accounts a ON a.id = t.account_id
     WHERE t.kind IN ('expense', 'refund')
-  `).all() as { id: number; date: string; processed_date: string | null; description: string; charged_amount: number; currency: string;
+  `).all() as { nature: ExpenseRow['nature']; id: number; date: string; processed_date: string | null; description: string; charged_amount: number; currency: string;
     kind: string; txn_type: string | null; installment_number: number | null; installment_total: number | null; category_id: number | null;
     account: string; account_id: string; account_kind: 'bank' | 'card'; company: string }[];
   const topOf = topCategories(db);
@@ -328,7 +330,7 @@ export function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
     if (rate == null) continue;
     out.push({ id: r.id, date: day, month: day.slice(0, 7), description: r.description, merchant: merchantKey(r.description),
       account: r.account.replace(/\s*···\s*/, ' ••'), amount: round(-r.charged_amount * rate), category: topOf(r.category_id),
-      accountId: r.account_id, accountKind: r.account_kind, company: r.company,
+      accountId: r.account_id, accountKind: r.account_kind, company: r.company, nature: r.nature,
       installment: (r.installment_total ?? 0) > 1 && r.installment_number ? [r.installment_number, r.installment_total!] : null });
   }
   return out;

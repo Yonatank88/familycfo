@@ -16,7 +16,7 @@ export const BILLS = 'Bills';
 export const RULE_ONLY_CATEGORIES = [TRANSFERS_TO_PEOPLE, CARD_NOT_ITEMISED];
 
 /** Money sent to someone: a named transfer, a mobile transfer, Bit / PayBox (not Bit2C, the exchange). */
-const TO_PEOPLE_PATTERN = /^העברה מהחשבון|^העב['׳] ל|^העברה בביט|(^|[\s\-])(ביט|bit|פייבוקס|paybox)(?=$|[\s\-*])/i;
+const TO_PEOPLE_PATTERN = /^העברה מהחשבון|^העב['׳] ל|^העברה ב\s?(ביט|bit)(?=$|[\s\-*])|(^|[\s\-])(ביט|bit|פייבוקס|paybox)(?=$|[\s\-*])/i;
 /** A fee on an FX transfer / purchase (Hapoalim "ע' העברת מט\"ח", Otsar Hahayal "עמלת מטח"). */
 const FX_FEE_PATTERN = /^ע['׳] העברת מט|עמלת מט["״]?ח/;
 

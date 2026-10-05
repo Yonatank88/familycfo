@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import type { DB } from '../db/connection.js';
 import { runClaude } from '../ai/claude.js';
 import { findCategory } from '../ingest/classify.js';
+import { AMBIGUOUS_SCRAPER_CATEGORIES } from '../db/schema.js';
 import { cleanMerchantName, merchantKey } from '../util.js';
 import { RULE_ONLY_CATEGORIES, applyCategoryRules } from './rules.js';
 
@@ -183,7 +184,7 @@ export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}):
     }
     // a scraper category whose merchants all landed in one category resolves without the AI from now on
     for (const [hint, ids] of hintAnswers) {
-      if (ids.size === 1 && findCategory(db, hint) == null) result.aliases += learn.run(hint, [...ids][0]).changes;
+      if (ids.size === 1 && findCategory(db, hint) == null && !AMBIGUOUS_SCRAPER_CATEGORIES.includes(hint)) result.aliases += learn.run(hint, [...ids][0]).changes;
     }
   })();
   return result;
