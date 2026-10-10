@@ -6,7 +6,7 @@ import type { DB } from '../db/connection.js';
 import { runClaude } from '../ai/claude.js';
 import { findCategory } from '../ingest/classify.js';
 import { AMBIGUOUS_SCRAPER_CATEGORIES } from '../db/schema.js';
-import { cleanMerchantName, merchantKey } from '../util.js';
+import { cleanMerchantName, merchantKey, merchantLine } from '../util.js';
 import { RULE_ONLY_CATEGORIES, applyCategoryRules } from './rules.js';
 
 /**
@@ -106,17 +106,18 @@ export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}):
   // those it left in the unknown category
   const again = all ? `OR category_source = 'ai'` : unknown && unknownId != null ? `OR (category_source = 'ai' AND category_id = ${unknownId})` : '';
   const rows = db.prepare(`
-    SELECT id, description, source_category, original_currency FROM transactions
+    SELECT id, description, memo, source_category, original_currency FROM transactions
     WHERE kind IN ('expense', 'refund') AND (category_id IS NULL ${again})
-  `).all() as { id: number; description: string; source_category: string | null; original_currency: string | null }[];
+  `).all() as { id: number; description: string; memo: string | null; source_category: string | null; original_currency: string | null }[];
   if (!rows.length) return result;
 
   const groups = new Map<string, Group>();
   for (const r of rows) {
-    const key = merchantKey(r.description);
+    const line = merchantLine(r.description, r.memo);
+    const key = merchantKey(line);
     const g: Group = groups.get(key) ?? { merchant: key, ids: [], names: new Map(), hints: new Set(), foreign: false };
     g.ids.push(r.id);
-    const name = cleanMerchantName(r.description);
+    const name = cleanMerchantName(line);
     g.names.set(name, (g.names.get(name) ?? 0) + 1);
     // a scraper category that didn't resolve (one that did would have categorised the row already)
     if (r.source_category?.trim()) g.hints.add(r.source_category.trim());

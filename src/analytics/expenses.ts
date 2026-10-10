@@ -1,6 +1,6 @@
 import type { DB } from '../db/connection.js';
 import { localDate } from '../ingest/normalize.js';
-import { cleanMerchantName, merchantKey, round, today } from '../util.js';
+import { merchantKey, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
 import { byCategory, expenseRows, rangeStart, type ExpenseRow, type Range } from './summary.js';
 import { NATURES, type Nature } from './nature.js';
@@ -76,18 +76,18 @@ export function remainingInstallments(db: DB, accountId: string, asOf = today())
   return { payments, plans: count, amount: round(amount) };
 }
 
-/** The top merchants of some rows: grouped by `merchantKey`, named by their most common description. */
+/** The top merchants of some rows: grouped by merchant, named by their most common name. */
 function topMerchants(rows: ExpenseRow[], limit = 8) {
   const merchants = new Map<string, { total: number; count: number; names: Map<string, number> }>();
   for (const r of rows) {
     const m = merchants.get(r.merchant) ?? { total: 0, count: 0, names: new Map() };
     m.total += r.amount;
     m.count++;
-    m.names.set(r.description, (m.names.get(r.description) ?? 0) + 1);
+    m.names.set(r.merchantName, (m.names.get(r.merchantName) ?? 0) + 1);
     merchants.set(r.merchant, m);
   }
   return [...merchants].filter(([, m]) => m.total > 0).sort((a, b) => b[1].total - a[1].total).slice(0, limit).map(([key, m]) => ({
-    key, name: cleanMerchantName([...m.names].sort((a, b) => b[1] - a[1])[0][0]), total: round(m.total), count: m.count,
+    key, name: [...m.names].sort((a, b) => b[1] - a[1])[0][0], total: round(m.total), count: m.count,
   }));
 }
 
@@ -130,8 +130,8 @@ function commitments(rows: ExpenseRow[], month: string) {
     if (typical <= 0) return [];
     const last = list.filter(r => r.amount > 0).map(r => r.date).sort().at(-1) ?? list.map(r => r.date).sort().at(-1)!;
     const names = new Map<string, number>();
-    for (const r of list) names.set(r.description, (names.get(r.description) ?? 0) + 1);
-    return [{ key, name: cleanMerchantName([...names].sort((a, b) => b[1] - a[1])[0][0]), category: list.at(-1)!.category.name, typical, lastDate: last }];
+    for (const r of list) names.set(r.merchantName, (names.get(r.merchantName) ?? 0) + 1);
+    return [{ key, name: [...names].sort((a, b) => b[1] - a[1])[0][0], category: list.at(-1)!.category.name, typical, lastDate: last }];
   }).sort((a, b) => b.typical - a.typical);
 }
 
@@ -208,7 +208,7 @@ export function expenseRowsIn(db: DB, filter: { month?: string; from?: string; s
       && (!filter.nature || r.nature === filter.nature))
     .sort((a, b) => b.date.localeCompare(a.date) || b.amount - a.amount)
     .map(r => ({
-      id: r.id, date: r.date, description: r.description, merchant: cleanMerchantName(r.description), merchantKey: r.merchant, account: r.account,
+      id: r.id, date: r.date, description: r.description, merchant: r.merchantName, merchantKey: r.merchant, account: r.account,
       source: sourceOf(r), company: r.company, category: r.category.key === 'none' ? null : r.category.name, nature: r.nature, amount: r.amount, installment: r.installment,
     }));
 }

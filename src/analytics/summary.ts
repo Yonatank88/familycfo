@@ -1,7 +1,7 @@
 import type { DB } from '../db/connection.js';
 import { SOURCE_NAMES } from '../db/ingestRepo.js';
 import { localDate } from '../ingest/normalize.js';
-import { addDays, cleanMerchantName, maskLast4, merchantKey, round, today } from '../util.js';
+import { addDays, cleanMerchantName, maskLast4, merchantKey, merchantLine, round, today } from '../util.js';
 import { rateToIls } from './fx.js';
 import { holdingValues } from './investments.js';
 import { reportOwners } from './owners.js';
@@ -270,7 +270,9 @@ export function summary(db: DB, asOf = today(), owners: Map<string, string> = ne
 // ---- expenses ----------------------------------------------------------------------------------------------
 
 export interface ExpenseRow {
-  id: number; date: string; month: string; description: string; merchant: string; account: string; amount: number; category: TopCategory;
+  id: number; date: string; month: string; description: string; account: string; amount: number; category: TopCategory;
+  /** the merchant: `merchantKey` of `merchantLine` (a Bit transfer by its recipient), and its shown name */
+  merchant: string; merchantName: string;
   accountId: string; accountKind: 'bank' | 'card'; company: string;
   /** monthly | everyday | one_off (transactions.nature; everyday until the pipeline has run) */
   nature: 'monthly' | 'everyday' | 'one_off';
@@ -311,12 +313,12 @@ export function byCategory(rows: { amount: number; category: TopCategory }[], li
  */
 export function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
   const rows = db.prepare(`
-    SELECT t.id, t.date, t.processed_date, t.description, t.charged_amount, COALESCE(t.charged_currency, 'ILS') AS currency,
+    SELECT t.id, t.date, t.processed_date, t.description, t.memo, t.charged_amount, COALESCE(t.charged_currency, 'ILS') AS currency,
       t.kind, t.txn_type, t.installment_number, t.installment_total, t.category_id, COALESCE(a.display_name, a.id) AS account,
       a.id AS account_id, a.kind AS account_kind, a.company, COALESCE(t.nature, 'everyday') AS nature
     FROM transactions t JOIN accounts a ON a.id = t.account_id
     WHERE t.kind IN ('expense', 'refund')
-  `).all() as { nature: ExpenseRow['nature']; id: number; date: string; processed_date: string | null; description: string; charged_amount: number; currency: string;
+  `).all() as { nature: ExpenseRow['nature']; id: number; date: string; processed_date: string | null; description: string; memo: string | null; charged_amount: number; currency: string;
     kind: string; txn_type: string | null; installment_number: number | null; installment_total: number | null; category_id: number | null;
     account: string; account_id: string; account_kind: 'bank' | 'card'; company: string }[];
   const topOf = topCategories(db);
@@ -328,7 +330,8 @@ export function expenseRows(db: DB, asOf = today()): ExpenseRow[] {
     if (day.slice(0, 7) > month) continue;
     const rate = rateToIls(db, r.currency, day);
     if (rate == null) continue;
-    out.push({ id: r.id, date: day, month: day.slice(0, 7), description: r.description, merchant: merchantKey(r.description),
+    const line = merchantLine(r.description, r.memo);
+    out.push({ id: r.id, date: day, month: day.slice(0, 7), description: r.description, merchant: merchantKey(line), merchantName: cleanMerchantName(line),
       account: r.account.replace(/\s*···\s*/, ' ••'), amount: round(-r.charged_amount * rate), category: topOf(r.category_id),
       accountId: r.account_id, accountKind: r.account_kind, company: r.company, nature: r.nature,
       installment: (r.installment_total ?? 0) > 1 && r.installment_number ? [r.installment_number, r.installment_total!] : null });
@@ -351,7 +354,7 @@ export function expenses(db: DB, months = 12, asOf = today()) {
         const m = merchants.get(r.merchant) ?? { total: 0, count: 0, names: new Map() };
         m.total += r.amount;
         m.count++;
-        m.names.set(r.description, (m.names.get(r.description) ?? 0) + 1);
+        m.names.set(r.merchantName, (m.names.get(r.merchantName) ?? 0) + 1);
         merchants.set(r.merchant, m);
       }
       return {
@@ -359,7 +362,7 @@ export function expenses(db: DB, months = 12, asOf = today()) {
         total: round(list.reduce((a, r) => a + r.amount, 0)),
         categories: byCategory(list),
         merchants: [...merchants].sort((a, b) => b[1].total - a[1].total).slice(0, 8).map(([key, m]) => ({
-          key, name: cleanMerchantName([...m.names].sort((a, b) => b[1] - a[1])[0][0]), total: round(m.total), count: m.count,
+          key, name: [...m.names].sort((a, b) => b[1] - a[1])[0][0], total: round(m.total), count: m.count,
         })),
       };
     }),

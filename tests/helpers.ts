@@ -17,15 +17,15 @@ let seq = 0;
 export function addTx(db: DB, t: {
   account: string; date: string; description: string; amount: number;
   processedDate?: string; kind?: string; categoryId?: number; txnType?: string;
-  installmentNumber?: number; installmentTotal?: number; status?: string; raw?: unknown;
+  installmentNumber?: number; installmentTotal?: number; status?: string; raw?: unknown; memo?: string;
 }): number {
   const iso = (d: string) => new Date(`${d}T00:00:00+03:00`).toISOString();
   return Number(db.prepare(`
-    INSERT INTO transactions (identifier, account_id, date, processed_date, description, original_amount,
+    INSERT INTO transactions (identifier, account_id, date, processed_date, description, memo, original_amount,
       original_currency, charged_amount, charged_currency, kind, kind_source, category_id, txn_type,
       installment_number, installment_total, status, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, 'ILS', ?, 'ILS', ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(`t${++seq}`, t.account, iso(t.date), t.processedDate ? iso(t.processedDate) : null, t.description,
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'ILS', ?, 'ILS', ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(`t${++seq}`, t.account, iso(t.date), t.processedDate ? iso(t.processedDate) : null, t.description, t.memo ?? null,
     t.amount, t.amount, t.kind ?? null, t.kind ? 'auto' : null, t.categoryId ?? null,
     t.txnType ?? null, t.installmentNumber ?? null, t.installmentTotal ?? null, t.status ?? 'completed',
     t.raw ? JSON.stringify(t.raw) : null).lastInsertRowid);

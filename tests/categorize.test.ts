@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { categorizeMerchants, type MerchantAnswer, type MerchantCategorizer, type MerchantInput } from '../src/categorize/index.js';
 import { categorizeTransactions } from '../src/ingest/classify.js';
 import { runPipeline } from '../src/pipeline.js';
-import { merchantKey } from '../src/util.js';
+import { merchantKey, merchantLine } from '../src/util.js';
 import type { DB } from '../src/db/connection.js';
 import { addAccount, addTx, testDb } from './helpers.js';
 
@@ -56,6 +56,19 @@ describe('merchant normalisation', () => {
     expect(merchantKey('עיריית תל אביב חנייה')).toBe('עיריית תל אביב חניה');
     expect(merchantKey('עיריית תא יפו חניה ח')).toBe('עיריית תל אביב חניה');
     expect(merchantKey('עיריית רמת גן')).toBe('עיריית רמת גן');
+  });
+
+  it('reads a Bit transfer\'s merchant from its recipient when the memo or the line names one, else "Bit"', () => {
+    expect(merchantLine('העברה ב BIT בנה"פ', 'העברה לרעות ברנע')).toBe('Bit – רעות ברנע');
+    expect(merchantLine('העברה ב BIT בנה"פ', 'העברת כספים לרעות ברנע')).toBe('Bit – רעות ברנע');
+    expect(merchantLine('הפועלים-ביט/יניב רוסק.העברה מב', null)).toBe('Bit – יניב רוסק');
+    expect(merchantLine('העברה מב הפועלים ביט/אדם  טויל', null)).toBe('Bit – אדם טויל');
+    expect(merchantLine('העברה בBIT', null)).toBe('Bit');
+    expect(merchantLine('העברה ב BIT בנה"פ', '')).toBe('Bit');
+    expect(merchantKey(merchantLine('העברה ב BIT בנה"פ', 'העברה לרעות ברנע'))).toBe('bit רעות ברנע');
+    expect(merchantKey(merchantLine('העברה בBIT'))).toBe('bit');
+    // not Bit
+    for (const d of ['מ.התחבורה-פנגו מוביט', 'ZETTLE_*BITARHUMEISSE', 'ביטוח ישיר', 'PAYBOX']) expect(merchantLine(d, null)).toBe(d);
   });
 });
 
@@ -135,7 +148,7 @@ describe('AI merchant categorizer', () => {
     const bit = addTx(db, { account: 'onezero:1', date: '2026-05-01', description: 'BIT העברה', amount: -10, kind: 'expense' });
     const odd = addTx(db, { account: 'max:1', date: '2026-05-01', description: 'yduj', amount: -10, kind: 'expense' });
     const ai = vi.fn<MerchantCategorizer>(async () => [
-      { merchant: 'bit העברה', category: 'סופרמרקט', confidence: 0.3 },
+      { merchant: 'bit', category: 'סופרמרקט', confidence: 0.3 },
       { merchant: 'yduj', category: 'Not a category', confidence: 0.9 },
     ]);
     await categorizeMerchants(db, { categorizer: ai, ...quiet });

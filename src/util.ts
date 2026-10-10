@@ -66,6 +66,24 @@ export function merchantKey(description: string): string {
   return tokens.join(' ').trim() || description.trim().toLowerCase();
 }
 
+/** A Bit transfer's line: Isracard "העברה בBIT", Cal "העברה ב BIT בנה"פ", the banks' "הפועלים-ביט/<name>…" (not מוביט, Bit2C). */
+const BIT_PATTERN = /^העברה ב\s?bit(?=$|[\s\-*/.])|(?:^|[\s\-])(?:ביט|bit)(?=$|[\s\-*/.])/i;
+/** The other side of a Bit transfer: Cal's memo "העברה ל<name>" / "העברת כספים ל<name>", a bank's "ביט/<name>". */
+function bitCounterparty(description: string, memo: string | null | undefined): string | null {
+  const m = memo?.match(/העבר(?:ה|ת כספים) ל-?\s*(\S.*)/) ?? description.match(/(?:ביט|bit)\s*\/\s*([^./]+)/i);
+  return m?.[1].replace(/\s+/g, ' ').trim() || null;
+}
+
+/**
+ * The line a row's merchant is read from (`merchantKey`, `cleanMerchantName`): its description, except a Bit transfer —
+ * "Bit – <name>" when the memo or the line names the other side, else "Bit".
+ */
+export function merchantLine(description: string, memo?: string | null): string {
+  if (!BIT_PATTERN.test(description.split(/\r?\n/)[0])) return description;
+  const who = bitCounterparty(description, memo);
+  return who ? `Bit – ${who}` : 'Bit';
+}
+
 /** "••1234": the last 4 digits of an account / card number, the one way they are shown. */
 export const maskLast4 = (number: string | null | undefined) => {
   const digits = String(number ?? '').replace(/\D/g, '');

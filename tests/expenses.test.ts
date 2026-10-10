@@ -182,3 +182,21 @@ describe('monthly commitments: one payee once', () => {
     expect(c.map(x => [x.key, x.typical])).toEqual([['עיריית תל אביב', 700], ['עיריית תל אביב חניה', 50]]);
   });
 });
+
+describe('Bit transfers: one merchant per recipient', () => {
+  it('splits Bit rows by the recipient the memo names; rows naming none stay one "Bit"', () => {
+    const db = testDb();
+    addAccount(db, 'isracard:1', 'card');
+    addAccount(db, 'visaCal:1', 'card');
+    addTx(db, { account: 'isracard:1', date: '2026-05-01', description: 'העברה בBIT', amount: -100, kind: 'expense' });
+    addTx(db, { account: 'isracard:1', date: '2026-05-02', description: 'העברה ב BIT בנה"פ', amount: -50, kind: 'expense' });
+    addTx(db, { account: 'visaCal:1', date: '2026-05-03', description: 'העברה ב BIT בנה"פ', memo: 'העברה לרעות ברנע', amount: -300, kind: 'expense' });
+    addTx(db, { account: 'visaCal:1', date: '2026-05-04', description: 'העברה ב BIT בנה"פ', memo: 'העברה לדנה כהן', amount: -20, kind: 'expense' });
+    const b = expenseBreakdown(db, '1Y', undefined, '2026-05', '2026-05-15');
+    expect(b.merchants.map(m => [m.key, m.name, m.total])).toEqual([
+      ['bit רעות ברנע', 'Bit – רעות ברנע', 300], ['bit', 'Bit', 150], ['bit דנה כהן', 'Bit – דנה כהן', 20],
+    ]);
+    expect(expenseRowsIn(db, { month: '2026-05', merchant: 'bit' }, '2026-05-15').map(r => [r.merchant, r.description]))
+      .toEqual([['Bit', 'העברה ב BIT בנה"פ'], ['Bit', 'העברה בBIT']]);
+  });
+});
