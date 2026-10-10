@@ -46,8 +46,16 @@ describe('merchant normalisation', () => {
     expect(merchantKey('משרד הפנים תל-אביב')).toBe('משרד הפנים');
     expect(merchantKey('איקאה נתניה\n(תשלום 2 מתוך 3)')).toBe('איקאה');
     expect(merchantKey('G2A.COM')).toBe('g2a com');
-    expect(merchantKey('עיריית תל אביב')).toBe('עיריית');
     expect(merchantKey('ירושלים')).toBe('ירושלים'); // never strips the whole name
+  });
+
+  it('keeps a municipality\'s city, spelled one way, its property tax and its other services apart', () => {
+    for (const d of ['עיריית ת"א', 'עיריית תל אביב', 'עיריית תל אביב יפו א', 'עיריית תל אביב-יפו,א', 'עיריית תל אביב-יפו-ארנונה']) {
+      expect(merchantKey(d)).toBe('עיריית תל אביב');
+    }
+    expect(merchantKey('עיריית תל אביב חנייה')).toBe('עיריית תל אביב חניה');
+    expect(merchantKey('עיריית תא יפו חניה ח')).toBe('עיריית תל אביב חניה');
+    expect(merchantKey('עיריית רמת גן')).toBe('עיריית רמת גן');
   });
 });
 

@@ -20,11 +20,33 @@ const COMPANY_TAILS = [['בע', 'מ'], ['בעמ'], ['ltd'], ['inc'], ['llc'], ['
 
 const endsWith = (tokens: string[], tail: string[]) =>
   tokens.length > tail.length && tail.every((t, i) => tokens[tokens.length - tail.length + i] === t);
+const isLoneLetter = (tok: string | undefined) => tok != null && [...tok].length === 1;
+
+/** A municipality: the city after it is the payee, not a tail. */
+const MUNICIPALITY = new Set(['עיריית', 'עירית', 'עיריה']);
+/** One city's spellings on statements (as tokens) → the one spelling; longest first. */
+const CITY_SPELLINGS: [string[], string[]][] = [
+  [['תל', 'אביב', 'יפו'], ['תל', 'אביב']], [['ת', 'א', 'יפו'], ['תל', 'אביב']], [['תא', 'יפו'], ['תל', 'אביב']],
+  [['ת', 'א'], ['תל', 'אביב']], [['תא'], ['תל', 'אביב']],
+];
+
+/**
+ * A municipality's merchant: "עיריית <city>", the city spelled one way ("ת"א", "תא יפו", "תל אביב-יפו" → תל אביב);
+ * ארנונה (its default charge — cut to a lone "א" by Isracard) dropped, other services (חניה) kept apart.
+ */
+function municipalityKey(tokens: string[]): string {
+  let rest = tokens.slice(1);
+  const spelling = CITY_SPELLINGS.find(([from]) => from.every((t, i) => rest[i] === t));
+  if (spelling) rest = [...spelling[1], ...rest.slice(spelling[0].length)];
+  rest = rest.filter(t => t !== 'ארנונה').map(t => (t === 'חנייה' ? 'חניה' : t));
+  if (rest.length > 1 && isLoneLetter(rest.at(-1))) rest = rest.slice(0, -1);
+  return ['עיריית', ...rest].join(' ');
+}
 
 /**
  * The merchant, for grouping: the first line of the description, lower-cased, without punctuation, reference numbers,
  * card suffixes (a number, or a token with 3+ digits — G2A and CHEF4 stay), a bank's "חיוב מ-" prefix, a company form (בע"מ, Ltd) or a city tail
- * ("… תל אביב", "… נתבג", a lone trailing letter) — as long as a name is left.
+ * ("… תל אביב", "… נתבג", a lone trailing letter) — as long as a name is left. A municipality keeps its city (`municipalityKey`).
  */
 export function merchantKey(description: string): string {
   let tokens = description
@@ -34,9 +56,10 @@ export function merchantKey(description: string): string {
     .replace(/[*"'`״׳.,()\-–_/\\|#?]+/g, ' ')
     .split(/\s+/)
     .filter(tok => tok && !/^\d+$/.test(tok) && (tok.match(/\d/g)?.length ?? 0) < 3);
+  if (tokens.length > 1 && MUNICIPALITY.has(tokens[0])) return municipalityKey(tokens);
   for (let changed = true; changed;) {
     changed = false;
-    for (const tail of [...COMPANY_TAILS, ...CITY_TAILS, ...(tokens.length > 1 && [...tokens.at(-1)!].length === 1 ? [[tokens.at(-1)!]] : [])]) {
+    for (const tail of [...COMPANY_TAILS, ...CITY_TAILS, ...(tokens.length > 1 && isLoneLetter(tokens.at(-1)) ? [[tokens.at(-1)!]] : [])]) {
       if (endsWith(tokens, tail)) { tokens = tokens.slice(0, -tail.length); changed = true; break; }
     }
   }

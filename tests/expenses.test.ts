@@ -166,3 +166,19 @@ describe('expenses by card', () => {
     expect(expenseBreakdown(db, '1Y', 'isracard:1', '2026-05', '2026-05-15').commitments).toEqual([]);
   });
 });
+
+describe('monthly commitments: one payee once', () => {
+  it('the municipality\'s spellings on the bank and the cards are one commitment', () => {
+    const db = testDb();
+    addAccount(db, 'hapoalim:1', 'bank');
+    addAccount(db, 'isracard:1', 'card');
+    addAccount(db, 'visaCal:1', 'card');
+    addTx(db, { account: 'isracard:1', date: '2026-03-05', description: 'עיריית תל אביב יפו א', amount: -700, kind: 'expense' });
+    addTx(db, { account: 'visaCal:1', date: '2026-04-05', description: 'עיריית תל אביב-יפו-ארנונה', amount: -700, kind: 'expense' });
+    addTx(db, { account: 'hapoalim:1', date: '2026-05-05', description: 'עיריית ת"א', amount: -700, kind: 'expense' });
+    addTx(db, { account: 'visaCal:1', date: '2026-05-06', description: 'עיריית תל אביב חנייה', amount: -50, kind: 'expense' });
+    db.prepare(`UPDATE transactions SET nature = 'monthly'`).run();
+    const c = expenseBreakdown(db, '1Y', undefined, '2026-05', '2026-05-15').commitments;
+    expect(c.map(x => [x.key, x.typical])).toEqual([['עיריית תל אביב', 700], ['עיריית תל אביב חניה', 50]]);
+  });
+});
