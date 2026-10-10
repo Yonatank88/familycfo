@@ -97,11 +97,16 @@ export async function watchHapoalimOtp(probe: () => Promise<HapoalimSnapshot | n
   const { unattended, graceMs = 15_000, intervalMs = 1000, maxMs = 200_000, now = Date.now } = options;
   const started = now();
   let submittedAt: number | null = null;
+  let lastState: HapoalimLoginState | null = null;
   while (now() - started < maxMs) {
     const s = await probe();
     if (s === 'closed') return 'closed';
     if (s) {
       const state = hapoalimLoginState(s);
+      if (process.env.HAPOALIM_TRACE && state !== lastState) {
+        console.log(`[hapoalim] ${state} submitted=${s.submitted} otpBox=${s.otpElement} ${s.url}\n  ${s.text.replace(/\s+/g, ' ').slice(0, 300)}`);
+        lastState = state;
+      }
       if (state === 'done') return 'done';
       if (state === 'error') return 'error';
       if (s.submitted) submittedAt ??= now();
