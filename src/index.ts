@@ -1,3 +1,4 @@
+import { lookup } from 'node:dns/promises';
 import cron from 'node-cron';
 import { scrapeAll, type Config } from './scraper.js';
 import { runPipeline } from './pipeline.js';
@@ -7,7 +8,22 @@ import { syncInvestments } from './sync/index.js';
 
 const config = loadConfig();
 
+// a run that fires right after the Mac wakes starts before the network is back, and every source then fails
+async function waitForNetwork(maxMs = 5 * 60_000): Promise<void> {
+  const until = Date.now() + maxMs;
+  for (;;) {
+    try {
+      await lookup('api.binance.com');
+      return;
+    } catch {
+      if (Date.now() > until) return console.log('Network still down after 5 minutes, scraping anyway');
+      await new Promise(r => setTimeout(r, 10_000));
+    }
+  }
+}
+
 async function run(cfg: Config): Promise<void> {
+  await waitForNetwork();
   const db = getDb();
   const results = [...await scrapeAll(cfg, db), ...await syncInvestments(cfg.investments, db)];
   console.log(`\nScrape done: ${results.map(r => `${r.company} ${r.success ? '✓' : `✗ ${r.errorType}`}`).join(', ')}`);
