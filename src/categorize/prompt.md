@@ -3,8 +3,10 @@ You categorise the merchants on an Israeli household's bank and credit-card stat
 Each merchant comes with:
 - `merchant`: the grouping key (lower-cased, numbers removed)
 - `examples`: up to three descriptions as they appear on the statements
-- `hint`: the card company's own category for it (Hebrew), when it gave one — a strong hint; map it to the closest category unless the merchant's name clearly says otherwise
+- `hint`: the card company's own category for it (Hebrew), when it gave one — possibly from another card's charges at the same merchant — a strong hint; map it to the closest category unless the merchant's name clearly says otherwise
 - `foreign`: true when it was charged in a foreign currency
+- `places`: where the card company says it was charged (city, or city and country abroad), when it says
+- `charges`, `typical`: how many charges it has and its median charge in ₪ — a small, frequent charge in a city is more likely a café, restaurant or grocer than a bill; use it to back a reading of the name, not instead of one
 
 The categories:
 - **Going out** — restaurants, cafés, bars, fast food, food delivery (Wolt, תן ביס / 10bis, Cibus, משלוחה), nightlife, cinema, theatre, concerts, events and tickets, attractions in Israel.
@@ -14,7 +16,7 @@ The categories:
 - **Transport** — fuel and charging (פז, דלק, סונול, Ten, דור אלון, Yellow), parking (פנגו, סלופארק, חניון, אחוזות החוף), public transport (רב-פס, רב קו, Moovit, רכבת ישראל), taxis (Gett, Yango, מוניות), car maintenance, car wash, garages, tyres, tolls (כביש 6, נתיבי איילון) — in Israel.
 - **Travel & abroad** — flights (אל על, Wizz, Ryanair, Etihad…), hotels, Booking, Airbnb, travel agents, eSIMs for travel, and anything bought at a merchant in another country (a foreign shop, restaurant, supermarket or transport while on a trip).
 - **Health** — doctors, dentists, clinics, hospitals, health funds (מכבי, כללית, מאוחדת, לאומית) and their co-pays, opticians, therapists, labs.
-- **Other** — government offices and fines (משרד הפנים, רשות האוכלוסין, דוחות), donations, cash withdrawals, and anything you can't tell (confidence below 0.5).
+- **Other** — government offices and fines (משרד הפנים, רשות האוכלוסין, דוחות), donations, cash withdrawals, payments to a private person's name with nothing saying what for, a credit-card company's bill paid from the bank (ישראכרט, מקס איט פיננסים, לאומי מקס, כאל — some banks print it backwards: טרכארשי, םיסנניפ טיא סקמ) and a placeholder with no merchant (טרם נקלט, "not yet received"), and anything you can't tell (confidence below 0.5). Don't settle for Other when the name says what the merchant is — a recognisable chain or brand, or a word like מסעדה, בר, קפה, פיצה, מאפייה, מכולת, סטודיו, מספרה, ספרים, תכשיטים, hotel, restaurant, café, bakery, pharmacy.
 
 A foreign-currency online shop bought from home is Consumerism, a foreign digital subscription is Bills; any other foreign-currency merchant is Travel & abroad.
 

@@ -23,7 +23,13 @@ const MIN_CONFIDENCE = 0.5;
 /** the category a low-confidence or unusable answer lands in, the first that exists */
 const UNKNOWN_NAMES = ['Unknown', 'לא ידוע', 'Uncategorized', 'Other', 'אחר'];
 
-export interface MerchantInput { merchant: string; examples: string[]; hint: string | null; foreign: boolean }
+export interface MerchantInput {
+  merchant: string; examples: string[]; hint: string | null; foreign: boolean;
+  /** where the card company says it was charged (city / country), up to three */
+  places: string[];
+  /** how many spend rows it has, and its median charge (ILS, rounded) */
+  charges: number; typical: number;
+}
 export interface CategoryInfo { name: string; parent: string | null; kind: string }
 export interface MerchantAnswer { merchant: string; category: string; confidence: number }
 /** The AI call — injectable, so tests never run Claude. */
@@ -85,7 +91,24 @@ export interface CategorizeOptions {
   log?: (msg: string) => void;
 }
 
-interface Group { merchant: string; ids: number[]; names: Map<string, number>; hints: Set<string>; foreign: boolean }
+const median = (xs: number[]) => {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b), h = s.length >> 1;
+  return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2;
+};
+
+/** Where a card row was charged, as the card company names it: Isracard / Amex city (and country abroad), Cal's address. */
+function placeOf(rawJson: string | null): string | null {
+  let raw: Record<string, unknown>;
+  try { raw = rawJson ? JSON.parse(rawJson) : null; } catch { return null; }
+  if (!raw || typeof raw !== 'object') return null;
+  const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const city = text(raw.cityDescription), country = text(raw.countryDescription);
+  const place = city && country && raw.countryCode !== 'ISR' ? `${city}, ${country}` : city || text(raw.merchantAddress);
+  return place || null;
+}
+
+interface Group { merchant: string; ids: number[]; names: Map<string, number>; hints: Set<string>; foreign: boolean; places: Set<string>; amounts: number[] }
 
 export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}): Promise<CategorizeResult> {
   const { categorizer = claudeCategorizer, all = false, unknown = false, log = console.log } = opts;
@@ -102,27 +125,36 @@ export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}):
   const byName = new Map(categories.map(c => [c.name, c.id]));
   const unknownId = UNKNOWN_NAMES.map(n => byName.get(n)).find(id => id != null) ?? null;
 
-  // the rows: spend without a category — with --all also those a previous AI answer categorised, with --unknown
-  // those it left in the unknown category
+  // the rows to categorise: spend without a category — with --all also those a previous AI answer categorised, with
+  // --unknown those it left in the unknown category; every spend row of their merchants gives them context
   const again = all ? `OR category_source = 'ai'` : unknown && unknownId != null ? `OR (category_source = 'ai' AND category_id = ${unknownId})` : '';
   const rows = db.prepare(`
-    SELECT id, description, memo, source_category, original_currency FROM transactions
-    WHERE kind IN ('expense', 'refund') AND (category_id IS NULL ${again})
-  `).all() as { id: number; description: string; memo: string | null; source_category: string | null; original_currency: string | null }[];
-  if (!rows.length) return result;
+    SELECT id, description, memo, source_category, original_currency, charged_amount, kind, raw_json,
+      (category_id IS NULL ${again}) AS pending
+    FROM transactions WHERE kind IN ('expense', 'refund')
+  `).all() as { id: number; description: string; memo: string | null; source_category: string | null; original_currency: string | null;
+    charged_amount: number; kind: string; raw_json: string | null; pending: number }[];
+  if (!rows.some(r => r.pending)) return result;
 
   const groups = new Map<string, Group>();
-  for (const r of rows) {
-    const line = merchantLine(r.description, r.memo);
-    const key = merchantKey(line);
-    const g: Group = groups.get(key) ?? { merchant: key, ids: [], names: new Map(), hints: new Set(), foreign: false };
+  const keyed = rows.map(r => ({ ...r, line: merchantLine(r.description, r.memo) })).map(r => ({ ...r, key: merchantKey(r.line) }));
+  for (const r of keyed.filter(x => x.pending)) {
+    const g: Group = groups.get(r.key) ?? { merchant: r.key, ids: [], names: new Map(), hints: new Set(), foreign: false, places: new Set(), amounts: [] };
     g.ids.push(r.id);
-    const name = cleanMerchantName(line);
+    const name = cleanMerchantName(r.line);
     g.names.set(name, (g.names.get(name) ?? 0) + 1);
-    // a scraper category that didn't resolve (one that did would have categorised the row already)
+    groups.set(r.key, g);
+  }
+  for (const r of keyed) {
+    const g = groups.get(r.key);
+    if (!g) continue;
+    // the card company's category: of a row still uncategorised it didn't resolve; of the merchant's other rows (another
+    // card's) it may have — either way a hint
     if (r.source_category?.trim()) g.hints.add(r.source_category.trim());
     if (r.original_currency && r.original_currency !== 'ILS') g.foreign = true;
-    groups.set(key, g);
+    const place = placeOf(r.raw_json);
+    if (place) g.places.add(place);
+    if (r.kind === 'expense') g.amounts.push(-r.charged_amount);
   }
   result.merchants = groups.size;
 
@@ -147,6 +179,9 @@ export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}):
           examples: [...g.names].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n),
           hint: [...g.hints][0] ?? null,
           foreign: g.foreign,
+          places: [...g.places].slice(0, 3),
+          charges: g.amounts.length,
+          typical: Math.round(median(g.amounts)),
         })), info);
       } catch (err) {
         // the CLI is missing or failed: what's cached still applies; these merchants are asked next run

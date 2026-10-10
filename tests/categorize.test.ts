@@ -176,6 +176,21 @@ describe('AI merchant categorizer', () => {
     expect(row(db, next)).toEqual({ category_id: c['מסעדות ובילויים'], category_source: 'scraper' });
   });
 
+  it('gives the AI the merchant\'s context: another card\'s category for it, where it was charged, how often and how much', async () => {
+    const db = testDb(); const c = seed(db);
+    addAccount(db, 'visaCal:1', 'card');
+    // Cal categorised the merchant; Isracard's rows of it came without a category
+    const cal = addTx(db, { account: 'visaCal:1', date: '2026-04-01', description: 'דרגון', amount: -60, kind: 'expense', categoryId: c['סופרמרקט'] });
+    db.prepare(`UPDATE transactions SET source_category = 'מזון ומשקאות', category_source = 'scraper' WHERE id = ?`).run(cal);
+    for (const amount of [-40, -50]) {
+      addTx(db, { account: 'max:1', date: '2026-05-01', description: 'דרגון', amount, kind: 'expense', raw: { cityDescription: 'תל אביב', countryCode: 'ISR' } });
+    }
+    const ai = mockAi({ 'דרגון': ['סופרמרקט', 0.8] });
+    await categorizeMerchants(db, { categorizer: ai.fn, ...quiet });
+    expect(ai.calls[0]).toEqual([{ merchant: 'דרגון', examples: ['דרגון'], hint: 'מזון ומשקאות', foreign: false, places: ['תל אביב'], charges: 3, typical: 50 }]);
+    expect(row(db, cal)).toEqual({ category_id: c['סופרמרקט'], category_source: 'scraper' });
+  });
+
   it('asks in batches of at most 150 merchants', async () => {
     const db = testDb(); seed(db);
     for (let i = 0; i < 160; i++) addTx(db, { account: 'max:1', date: '2026-05-01', description: `merchant ${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`, amount: -1, kind: 'expense' });
