@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, Cell, XAxis } from 'recharts';
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
 import { api, type Commitment, type ExpenseCategory, type ExpenseFilter, type ExpenseSource, type Nature, type NatureSplit, type Range } from './api';
@@ -99,26 +99,55 @@ function SourceCard({ s, prev, active, onClick, fmt }: { s: ExpenseSource; prev:
   );
 }
 
+/** A merchant's category, a small select: a pick re-tags all its rows (every month, every card) and everything refetches. */
+function CategorySelect({ merchant, value }: { merchant: string; value: string | null }) {
+  const qc = useQueryClient();
+  const { data: options } = useQuery({ queryKey: ['merchant-categories'], queryFn: api.merchantCategories, staleTime: Infinity });
+  const [saving, setSaving] = useState(false);
+  if (!options) return null;
+  const pick = async (category: string) => {
+    setSaving(true);
+    try {
+      await api.setMerchantCategory(merchant, category);
+      await qc.invalidateQueries({ predicate: q => q.queryKey[0] !== 'merchant-categories' });
+    } finally { setSaving(false); }
+  };
+  return (
+    <select aria-label="Category" value={value ?? ''} disabled={saving} onChange={e => pick(e.target.value)}
+      className="max-w-32 shrink-0 cursor-pointer truncate rounded bg-ink/[0.05] px-1.5 py-px text-[10.5px] font-medium text-muted hover:text-ink disabled:opacity-50">
+      {(value == null || !options.includes(value)) && <option value={value ?? ''} disabled>{value ?? '—'}</option>}
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
 /** The rows behind a bar, a category or a merchant. */
 function RowsPanel({ filter, kicker, title, onClose, fmt, byMerchant = false }: {
   filter: ExpenseFilter; kicker: string; title: string; onClose: () => void; fmt: (n: number) => string; byMerchant?: boolean;
 }) {
   const { data } = useQuery({ queryKey: ['expense-rows', filter], queryFn: () => api.expenseRows(filter) });
   const total = data?.reduce((s, r) => s + r.amount, 0);
-  const merchants = new Map<string, { key: string; name: string; total: number }>();
+  const merchants = new Map<string, { key: string; name: string; total: number; category: string | null }>();
   if (byMerchant) for (const r of data ?? []) {
-    const m = merchants.get(r.merchantKey) ?? { key: r.merchantKey, name: r.merchant, total: 0 };
+    const m = merchants.get(r.merchantKey) ?? { key: r.merchantKey, name: r.merchant, total: 0, category: r.category };
     m.total += r.amount;
     merchants.set(r.merchantKey, m);
   }
   const ranked = [...merchants.values()].filter(m => m.total > 0).sort((a, b) => b.total - a.total);
+  // one merchant's panel: its category (the most common of its rows)
+  const counts = new Map<string | null, number>();
+  if (filter.merchant) for (const r of data ?? []) counts.set(r.category, (counts.get(r.category) ?? 0) + 1);
+  const category = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
   return (
     <SidePanel onClose={onClose} kicker={kicker} title={<bdi dir="auto">{title}</bdi>} wide
-      meta={total != null && <span className="tabular-nums">{fmt(total)}</span>}>
+      meta={total != null && <span className="flex items-center gap-2">
+        {filter.merchant && category !== undefined && <CategorySelect merchant={filter.merchant} value={category} />}
+        <span className="tabular-nums">{fmt(total)}</span>
+      </span>}>
       {ranked.length > 0 && (
         <div className="mb-4 rounded-2xl border border-line bg-surface px-4 py-3">
           <h3 className="mb-1 text-[11px] font-medium uppercase tracking-wide text-faint">Merchants</h3>
-          <BarList items={ranked} format={fmt} />
+          <BarList items={ranked} format={fmt} extra={m => <CategorySelect merchant={m.key} value={merchants.get(m.key)?.category ?? null} />} />
         </div>
       )}
       <div className="rounded-2xl border border-line bg-surface">

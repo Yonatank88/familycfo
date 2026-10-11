@@ -136,7 +136,7 @@ describe('bank history backfill', () => {
 });
 
 /** The baseline and every step after it. */
-const VERSIONS = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112];
+const VERSIONS = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113];
 
 describe('database', () => {
   it('refuses a database with another schema', () => {

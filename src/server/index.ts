@@ -21,6 +21,7 @@ import { ACCOUNTS_FILE, loadConfig } from '../config.js';
 import { applyDraft, catalog, listIntegrations, onlyEntry, readConfigFile, removeEntry, setDisabled, writeConfigFile, type Draft } from '../integrations/manage.js';
 import { deleteSourceData } from '../integrations/data.js';
 import { LINKABLE, startLink, type LinkSession } from '../integrations/link.js';
+import { merchantCategoryOptions, setMerchantCategory } from '../categorize/user.js';
 import { round } from '../util.js';
 
 const db = getDb();
@@ -118,6 +119,15 @@ app.get('/api/expenses/breakdown', async req => {
   const q = req.query as Record<string, string>;
   if (q.month && !/^\d{4}-\d{2}$/.test(q.month)) throw badRequest('month must be YYYY-MM');
   return expenseBreakdown(db, rangeOf(q.range), q.source || undefined, q.month || undefined, undefined, natureOf(q.nature));
+});
+
+// the categories a merchant can be set to; setting one re-tags all the merchant's spend rows and is never overwritten
+app.get('/api/merchant-categories', async () => merchantCategoryOptions(db));
+app.post('/api/merchant-categories', async req => {
+  const { merchant, category } = (req.body ?? {}) as { merchant?: unknown; category?: unknown };
+  if (typeof merchant !== 'string' || !merchant.trim()) throw badRequest('merchant is required');
+  if (typeof category !== 'string' || !merchantCategoryOptions(db).includes(category)) throw badRequest('no such category');
+  return setMerchantCategory(db, merchant, category);
 });
 
 // each fund (pension, study, provident, mutual) with its growth over the range and the returns its reports state

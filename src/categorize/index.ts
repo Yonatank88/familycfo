@@ -8,6 +8,7 @@ import { findCategory } from '../ingest/classify.js';
 import { AMBIGUOUS_SCRAPER_CATEGORIES } from '../db/schema.js';
 import { cleanMerchantName, merchantKey, merchantLine } from '../util.js';
 import { RULE_ONLY_CATEGORIES, applyCategoryRules } from './rules.js';
+import { applyUserCategories } from './user.js';
 
 /**
  * Fully automatic merchant categorisation, after the scraper-category step: every spend row (expense / refund) still
@@ -78,6 +79,7 @@ export interface CategorizeResult {
   answered: number;    // answers cached this run
   rows: number;        // rows given a category
   ruleRows: number;    // rows given a category by rule (src/categorize/rules.ts)
+  userRows: number;    // rows given the category the user chose for their merchant (src/categorize/user.ts)
   aliases: number;     // scraper category names learned
   failed: string | null;
 }
@@ -112,10 +114,11 @@ interface Group { merchant: string; ids: number[]; names: Map<string, number>; h
 
 export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}): Promise<CategorizeResult> {
   const { categorizer = claudeCategorizer, all = false, unknown = false, log = console.log } = opts;
-  const result: CategorizeResult = { merchants: 0, asked: 0, answered: 0, rows: 0, ruleRows: 0, aliases: 0, failed: null };
+  const result: CategorizeResult = { merchants: 0, asked: 0, answered: 0, rows: 0, ruleRows: 0, userRows: 0, aliases: 0, failed: null };
 
-  // rules first: the rows they explain never reach the AI
+  // rules first: the rows they explain never reach the AI; then the user's merchant choices, which win over everything
   result.ruleRows = applyCategoryRules(db).rows;
+  result.userRows = applyUserCategories(db);
 
   // only spend categories are offered: a merchant never changes what a row counts as (nor the rule-only ones)
   const categories = (db.prepare(`
@@ -213,7 +216,7 @@ export async function categorizeMerchants(db: DB, opts: CategorizeOptions = {}):
   db.transaction(() => {
     for (const g of groups.values()) {
       const c = cached.get(g.merchant);
-      if (!c || c.category_id == null) continue;
+      if (!c || c.category_id == null || c.source === 'user') continue;
       for (const id of g.ids) result.rows += apply.run(c.category_id, c.source, id).changes;
       if (c.category_id === unknownId) continue;
       for (const h of g.hints) hintAnswers.set(h, (hintAnswers.get(h) ?? new Set()).add(c.category_id));

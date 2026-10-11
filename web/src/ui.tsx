@@ -55,8 +55,10 @@ export function CardLink({ onClick, children }: { onClick: () => void; children:
  * A ranked list with proportional bars (top merchants, top categories): name, bar, amount. Each row opens `onSelect`
  * when given; the "none" key (uncategorised) is grey.
  */
-export function BarList({ items, format, onSelect }: {
+export function BarList({ items, format, onSelect, extra }: {
   items: { key: string; name: string; total: number }[]; format: (n: number) => string; onSelect?: (item: { key: string; name: string }) => void;
+  /** shown after the name (only where rows aren't buttons) */
+  extra?: (item: { key: string; name: string }) => ReactNode;
 }) {
   const top = items[0]?.total || 1;
   return (
@@ -65,6 +67,7 @@ export function BarList({ items, format, onSelect }: {
         const inner = (
           <>
             <span className="min-w-0 flex-1 truncate text-ink"><bdi dir="auto">{m.name}</bdi></span>
+            {extra?.(m)}
             <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-line sm:w-28">
               <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (m.total / top) * 100)}%`, background: m.key === 'none' ? OTHER : PALETTE[i % PALETTE.length] }} />
             </span>

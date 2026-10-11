@@ -188,6 +188,8 @@ export const api = {
     request<ExpenseBreakdown>(`/api/expenses/breakdown?range=${range}${month ? `&month=${month}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}${nature ? `&nature=${nature}` : ''}`),
   expenseRows: (filter: ExpenseFilter) =>
     request<ExpenseRow[]>(`/api/expenses/rows?${new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][])}`),
+  merchantCategories: () => request<string[]>('/api/merchant-categories'),
+  setMerchantCategory: (merchant: string, category: string) => post<{ rows: number }>('/api/merchant-categories', { merchant, category }),
   funds: (range: Range) => request<Funds>(`/api/funds?range=${range}`),
   investments: (range: Range) => request<Investments>(`/api/investments?range=${range}`),
   cashFlow: (range: Range, account?: string) => request<CashFlow>(`/api/cashflow?range=${range}${account ? `&account=${encodeURIComponent(account)}` : ''}`),

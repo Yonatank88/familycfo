@@ -2,6 +2,7 @@ import { getDb, type DB } from './db/connection.js';
 import { categorizeTransactions, deriveKinds } from './ingest/classify.js';
 import { categorizeMerchants, type MerchantCategorizer } from './categorize/index.js';
 import { applyCategoryRules } from './categorize/rules.js';
+import { applyUserCategories } from './categorize/user.js';
 import { localDate } from './ingest/normalize.js';
 import { matchCurrencyExchanges, matchImmediateCardDebits, matchInternalTransfers, reconcileCardBills } from './ingest/transfers.js';
 import { backfillRates, refreshBoiRates } from './analytics/fx.js';
@@ -45,12 +46,12 @@ export async function runPipeline(db: DB = getDb(), opts: PipelineOptions = {}):
   const transfers = matchInternalTransfers(db);
   const fxExchanges = matchCurrencyExchanges(db);
   let merchantRows = 0;
-  if (opts.categorizer === false) merchantRows = applyCategoryRules(db).rows;
+  if (opts.categorizer === false) merchantRows = applyCategoryRules(db).rows + applyUserCategories(db);
   else {
     // never fails the pipeline: without the claude CLI the rows just stay uncategorised until the next run
     try {
       const ai = await categorizeMerchants(db, opts.categorizer ? { categorizer: opts.categorizer } : {});
-      merchantRows = ai.rows + ai.ruleRows;
+      merchantRows = ai.rows + ai.ruleRows + ai.userRows;
     } catch (err) { console.warn('  merchants not categorised:', (err as Error).message); }
   }
   const natures = computeNatures(db);

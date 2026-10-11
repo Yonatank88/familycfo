@@ -263,6 +263,22 @@ const STEPS: { version: number; name: string; sql: string }[] = [
     return `DELETE FROM category_aliases WHERE name IN (${names});
       UPDATE transactions SET category_id = NULL, category_source = NULL WHERE category_source = 'scraper' AND source_category IN (${names});`;
   })() },
+  { version: 113, name: 'merchant_categories.source user', sql: `
+    -- a merchant's category the user chose (src/categorize/user.ts): its rows become category_source = 'manual', and
+    -- no rule, scraper category or AI answer replaces it. A CHECK can only change with a table rebuild, every row kept
+    CREATE TABLE merchant_categories_new (
+      merchant TEXT PRIMARY KEY,
+      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      confidence REAL,
+      source TEXT NOT NULL CHECK (source IN ('ai','rule','user')),
+      model TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO merchant_categories_new (merchant, category_id, confidence, source, model, created_at)
+    SELECT merchant, category_id, confidence, source, model, created_at FROM merchant_categories;
+    DROP TABLE merchant_categories;
+    ALTER TABLE merchant_categories_new RENAME TO merchant_categories;
+  ` },
 ];
 const EXPECTED = [BASELINE_VERSION, ...STEPS.map(s => s.version)];
 
